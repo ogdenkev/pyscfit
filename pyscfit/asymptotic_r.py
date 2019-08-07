@@ -1,8 +1,12 @@
 """Functions to calculate values for the approximate solution to R(t)"""
 
+# Need scipy>=1.2.0 for optimize.root_scalar
 import scipy.integrate
 import scipy.linalg
+import scipy.optimize
 import numpy as np
+
+from qmatrix import phi
 
 def asymptotic_r_vals(q, A, F, tau):
     """Calculate the values used for the asymptotic approximation of R
@@ -54,43 +58,129 @@ def asymptotic_r_vals(q, A, F, tau):
     Wprime = np.zeros((kA, kA, kA))
     areaR = np.zeros((kA, kA, kA))
     a = np.zeros((kA, 1))
-    npts = 100*kA + 1
-    x0 = np.zeros((1, npts))
-    y0 = np.zeros((1, npts))
-    idx1 = np.zeros((1, kA))
-    idx2 = np.zeros((1, kA))
+    # We want to interpolate each interval [detW[i-1], detW[i]] with 100 points where
+    # detW[-1] = 0 (in other words, prepend detW with 0) and detW.size should be kA
+    # Then let delta = k * ((detW[i] - detW[i-1]) / 100) where k = 0, 1, ..., 100
+    # which is a total of 101 points
+    # Thus there are kA+1 actual points comprising kA regions to interpolate,
+    # and each region requires 101 points, but the 100-th point of region v is
+    # the same as the 0-th point of region v-1 so the total points needed is
+    # num_regions * (points_per_region+1) - (num_points - 2)
+    # = kA*(100+1) - ((kA+1) - 2) = 100kA + kA - kA - 1 + 2 = 100kA + 1
+    pts_per_region = 100
+    npts = pts_per_region*kA + 1
+    x0 = np.zeros(npts)
+    y0 = np.zeros(npts)
+    idx1 = np.zeros(kA, dtype='int')
+    idx2 = np.zeros(kA, dtype='int')
     
     eqFFt = scipy.linalg.expm(q[np.ix_(F, F)] * tau)
     
-    raise NotImplementedError()
+    # Find the kA roots of det W(s) = 0
+    # First, guess that the roots are the same as the tau^-1 for the uncorrected
+    # distribution
+    D, V = scipy.linalg.eig(q[np.ix_(A, A)])
+    # Add a zero to the start of the eigenvalues and then convert the array
+    # to a column vector from a 0-d array
+    D = np.concatenate((np.zeros(1), D)).reshape(-1, 1)
+    tempx = np.real(np.sort(D, axis=0))
+
+    #  Start with the values of tempx closest to zero, which correspond to time
+    #  constants with the longest duration since tau ~= 1 ./ s
+    #  This will allow us to (hopefully) find the time constants that are above
+    #  the imposed resolution
+    #  KKO 27 Aug 2014
+    tempx = tempx[::-1, :]  # flipud(tempx)
+
+    #  What if all eigenvalues are the same??? Does det W still have kA roots?
+    #  Is the Q matrix then reducible?
+
+    #  Construct initial guesses by evenly spacing 100 points in between the
+    #  values in tempx
+    #  Then find when the sign of detW(x0) changes and save that index for later
+    #  input to rootsdetW
+    uu = 0
+    for i_region in np.arange(kA):
+        left = tempx[i_region]
+        right = tempx[i_region+1]
+        dx = (right - left) / pts_per_region
+        for i_pt in np.arange(pts_per_region + 1):
+            if i_pt == 0 and i_region > 0:
+                continue
+            ind = i_region*(pts_per_region) + i_pt
+            x0[ind] = dx * i_pt + left
+            y0[ind] = np.real(detW(x0[ind], q, A, F, tau))
+            if ind > 0:
+                if y0[ind] > 0 and y0[ind-1] < 0:
+                    idx1[uu] = ind-1
+                    idx2[uu] = ind
+                    uu += 1
+                elif y0[ind]<0 and y0[ind-1]>0:
+                    idx1[uu] = ind-1
+                    idx2[uu] = ind
+                    uu += 1
+            if uu>=kA:
+                break
+        if uu>=kA:
+            break
+    
+    ii=0
+    x0 = np.real(x0)
+    for rr in np.arange(uu):
+        bracket = [x0[idx1[rr]], x0[idx2[rr]]]
+        sol = scipy.optimize.root_scalar(detW, bracket=bracket, args=(q,A,F,tau))
+        if np.all(np.abs(sol.root-s)>TOL):
+            s[ii] = sol.root
+            ii += 1
+    
+    # If not all roots have been found, try using fzeroKO (in rootsdetW) using
+    # the first and last values of x0 as inputs
+    if np.any(np.isinf(s)):
+        ii = np.nonzero(np.isinf(s))[0]
+        sol = scipy.optimize.root_scalar(detW, x0=x0[-1], args=(q,A,F,tau))
+        if np.all(np.abs(sol.root-s)>TOL):
+            s[ii] = sol.root
+    
+    if np.any(np.isinf(s)):
+        ii = np.nonzero(np.isinf(s))[0]
+        sol = scipy.optimize.root_scalar(detW, x0=x0[1], args=(q,A,F,tau))
+        if np.all(np.abs(sol.root-s)>TOL):
+            s[ii] = sol.root
+
+    # If we still haven't found all roots, then give up
+    if np.any(np.isinf(s)):
+        return
+    
+    # Calculate the right and left eigenvectors of H(s), where s are the roots
+    # of det W(s) = 0, which are also eigenvalues of H(s)
+    #
+    # The left eigenvector, r, is a solution to rW(s) = 0, ru=1, where u is a
+    # vector of ones - this is similar to finding equilibrium vector of a Q
+    # matrix (e.g. Hawkes and Sykes 1990)
+    #
+    # The right eigenvector, c, is a solution to c'W(s)' = 0, c'u =1
+
+    for ii in np.arange(kA):
+        _Ws = W(s[ii], q, A, F, tau)
+        numer = np.concatenate((_Ws, np.ones((kA, 1))), axis=1)
+        denom = np.concatenate((np.zeros((1, kA)), np.ones((1, 1))), axis=1)
+        r_sol, res, rank, singular_vals = scipy.linalg.lstsq(numer.T, denom.T)
+        r[ii, :] = r_sol.T
+        numer = np.concatenate((_Ws.T, np.ones((kA, 1))), axis=1)
+        c_sol, res, rank, singular_vals = scipy.linalg.lstsq(numer.T, denom.T)
+        c[ii, :] = c_sol.T
+    c = c.T
+
+    mu = -1.0 / s
+    for ii in np.arange(kA):
+        Wprime[:,:,ii] = dWds(s[ii],q,A,F,tau)
+        areaR[:,:,ii] = c[:,ii,None] @ r[None,ii,:] / (r[None,ii,:] @ Wprime[:,:,ii] @ c[:,ii,None])
+        a[ii] = mu[ii] * phi(q,A,F,tau) \
+            @ c[:,ii,None] @ r[None,ii,:] @ q[np.ix_(A,F)] @ eqFFt @ uf \
+            / (r[None,ii,:] @ Wprime[:,:,ii] @ c[:,ii,None])
     
     return s, areaR, r, c, Wprime, mu, a
 
-def detW(s, q, A, F, tau):
-    """Determinant of the matrix function W(s)
-    
-    See Hawkes, Jalali, & Colquhoun (1990)
-    
-    Parameters
-    ----------
-    s : 
-    q : 2-d array
-        The Q matrix
-    A : array
-        Indices of states in class 1
-    F : array
-        Indices of states in class 2
-    tau : float
-        The dead time (or resolution)
-    
-    Returns
-    -------
-    2-d array
-        The determinant of W(s)
-    """
-    
-    return scipy.linalg.det(W(s,q,A,F,tau))
-    
 def W(s, q, A, F, tau):
     """Matrix function W(s)
 
@@ -153,6 +243,35 @@ def W(s, q, A, F, tau):
 
     return W
     
+def detW(s, q, A, F, tau):
+    """Determinant of the matrix function W(s)
+    
+    See Hawkes, Jalali, & Colquhoun (1990)
+    
+    Parameters
+    ----------
+    s : 
+    q : 2-d array
+        The Q matrix
+    A : array
+        Indices of states in class 1
+    F : array
+        Indices of states in class 2
+    tau : float
+        The dead time (or resolution)
+    
+    Returns
+    -------
+    2-d array
+        The determinant of W(s)
+    """
+    
+    return scipy.linalg.det(W(s,q,A,F,tau))
+
+# def rootsdetW(q, A, F, tau, x0):
+#     """Roots of the determinant of W(s)"""
+#     y = scipy.optimize.newton(detW, x0, args=(q, A, F, tau))
+
 def dWds( s, q, A, F, tau ):
     """Calculate the derivative of the matrix function W(s)
     
@@ -184,12 +303,12 @@ def dWds( s, q, A, F, tau ):
     qAF = q[np.ix_(A,F)]
     qFF = q[np.ix_(F,F)]
     qFA = q[np.ix_(F,A)]
-    idA = np.eye(qAA.shape)
-    idF = np.eye(qFF.shape)
+    idA = np.eye(*qAA.shape)
+    idF = np.eye(*qFF.shape)
     M = s*idF - qFF
     
     # From eq (2.16) in Hawkes et al (1990), SFF*(s) = I-expm(-(s*I-Q(F,F))*tau)
-    SFF = idF - scipy.linalg.expm(-M*tau);
+    SFF = idF - scipy.linalg.expm(-M*tau)
     
     # From eq (4) in Hawkes et al (1992), GFA*(s) = inv(s*I-Q(F,F))*Q(F,A)
     GFA = scipy.linalg.solve(M, qFA)
@@ -198,4 +317,68 @@ def dWds( s, q, A, F, tau ):
 
     dWds = idA + qAF @ (SFF_M_inv - tau*(idF-SFF)) @ GFA
 
-    return dWds    
+    return dWds
+
+def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
+    """Gives the initial and final vectors used for rate MLE from bursts
+    
+    The initial vector, phib, and the final vector, ef, are used in the
+    maximum likelihood estimation of single channel rate constants when the
+    input data are bursts of channel activity. These vectors are described
+    by Colquhoun, Hawkes, and Srodzinski (1996) Phil Trans R Soc Lond A,
+    equations 5.8 and 5.11
+    
+    Parameters
+    ----------
+    q : 2-d array
+        The Q matrix of transition probabilities
+    A : array
+        The initial set of states
+    F : array
+        The final set of states after the transition
+    areaR : 3-d array
+        The matrix used to determine the asymptotic approximation of the
+        distribution of e-opens and e-shuts. If A corresponds to the open
+        states, then areaR should correspond to the shut states and vice
+        versa. areaR can be calculated from `asymptotic_r_vals`
+    mu : 1-d array
+        Time constants for the asymptotic shut time distribution - this is
+        returned from `asymptoticRvals`.
+    tau : float
+        Resolution (or dead time) imposed on the data
+    tcrit : float
+        Critical gap length separating bursts of activity arising from a
+        single ion channel
+    
+    Returns
+    -------
+    phib : 1-d array
+        The initial vectors for MLE of the rates
+    ef : 1-d array
+        The final vector to use for MLE of the rates
+    """
+    
+    kA = A.size
+    kF = F.size
+    uA = np.ones((kA, 1))
+    Hfa = np.zeros((kF, kA))
+    
+    # const.shape == (kF, kA)
+    const = q[np.ix_(F, A)] @ scipy.linalg.expm(q[np.ix_(A, A)] * tau)
+    time = tcrit - tau
+    
+    phiF = phi(q, A, F, tau)
+    
+    if areaR.shape != (kF, kF, kF):
+        raise ValueError("areaR.shape, {}, must be (kF, kF, kF) where kF = F.size, but"
+                         "F.size is {}".format(areaR.shape, kF))
+    
+    for i in np.arange(kF):
+        Hfa += areaR[:, :, i] @ const * mu[i] * np.exp(-time / mu[i])
+    
+    ef = Hfa @ uA
+    numer = phiF @ Hfa @ uA
+    denom = phiF @ Hfa
+    phib = scipy.linalg.solve(numer.T, denom.T).T
+    
+    return phib, ef

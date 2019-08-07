@@ -187,7 +187,7 @@ def cvals(q, A, F, td, mMax=2):
     
     return C
 
-def R(C, lambdas, tau, s, areaR, mMax=2, t):
+def R(t, C, lambdas, tau, s, areaR, mMax=2):
     """Calculate the value of the matrix function R(t)
     
     R(t) is a kind of reliability or survivor function, in which R(i,j)
@@ -251,3 +251,101 @@ def R(C, lambdas, tau, s, areaR, mMax=2, t):
             f += np.real(np.exp(s[ii]*t) * areaR[:, :, ii])
 
     return f
+
+def eG(q, A, F, tau, s):
+    """Laplace transform of the corrected probability density matrix
+    
+    A semi-Markov process occurs when the Markov process with the
+    transition rate matrix Q switches from the set of states A to the
+    set of states F. This function gives the Laplace transform of the
+    matrix of probability densities of the intervals in the case when all
+    events of duration less than tau are missed.
+    
+    See equations 2.12, 2.19, and 2.20 of HJC1990.
+    
+    Parameters
+    ----------
+    q : 2-d array
+        The Q matrix of transition probabilities
+    A : array
+        The initial set of states
+    F : array
+        The final set of states after the transition
+    tau : float
+        The dead time or resolution, below which all events are missed
+    s : complex
+        The Laplace variable, s, which is a complex number
+    
+    Returns
+    -------
+    eG : 2-d array
+        The Laplace transform of the probability density matrix when events
+        shorter than tau duration are missed.
+    """
+    
+    nA = A.size
+    nF = F.size
+    I_AA = np.eye(nA)
+    I_FF = np.eye(nF)
+    
+    qAA = q[np.ix_(A, A)]
+    qAF = q[np.ix_(A, F)]
+    qFF = q[np.ix_(F, F)]
+    qFA = q[np.ix_(F, A)]
+    
+    # See equations 2.9 and 2.10 of HJC1990
+    Gstar_AF = scipy.linalg.solve(s*I_AA - qAA, qAF)
+    Gstar_FA = scipy.linalg.solve(s*I_FF - qFF, qFA)
+    
+    prob_tau_to_inf = scipy.linalg.expm(-(s*I_FF - qFF) * tau)
+    # See equations 2.16 and 2.18 in HJC1990
+    short_FF = I_FF - prob_tau_to_inf
+    # See equations 2.17 and 2.18 in HJC1990
+    long_FF = prob_tau_to_inf
+    
+    numer = I_AA - Gstar_AF @ short_FF @ Gstar_FA
+    denom = Gstar_AF @ long_FF
+    y = scipy.linalg.solve(numer, denom)
+    
+    return y
+
+def phi(q, A, F, tau):
+    """Equilibrium vector for the semi-Markov process
+    
+    A semi-Markov process is embedded in the continuous time Markov chain
+    with transition rate matrix Q when that process changes from the set
+    of states A to the set of states F. This function gives the equilibrium
+    vector of that semi-Markov process.
+    
+    See equations 2.14 of HJC1990.
+    Also see Hawkes and Sykes (1990) IEEE Trans on Reliability
+    
+    Parameters
+    ----------
+    q : 2-d array
+        The Q matrix of transition probabilities
+    A : array
+        The initial set of states
+    F : array
+        The final set of states after the transition
+    tau : float
+        The dead time or resolution below which no events are detected
+    
+    Returns
+    -------
+    phi : 1-d array
+        The equilibrium state vector
+    """
+    
+    # phi is the solution to the equation
+    # phi @ C = zF, or equivalently, C.T @ phi.T = zF.T
+    # and C is an augmented matrix
+    # where zF is the augmented matrix [0, 0, ... , 0_nstates, 1]
+    
+    nA = A.size
+    uF = np.ones((nA, 1))
+    C = np.eye(nA) - eG(q, A, F, tau, 0) @ eG(q, F, A, tau, 0)
+    C = np.concatenate((C, uF), axis=1)
+    zF = np.concatenate((np.zeros((1, nA)), np.ones((1, 1))), axis=1)
+    phi, residues, rank, singular_vals = scipy.linalg.lstsq(C.T, zF.T)
+    return phi.T
