@@ -3,6 +3,7 @@
 import warnings
 import numpy as np
 import scipy.linalg
+import scipy.sparse.csgraph
 
 from qmatrix import cvals, phi, R
 from asymptotic_r import asymptotic_r_vals, chs_vectors
@@ -10,11 +11,11 @@ from utils import _match
 
 def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     """Log likelihood of rates in a gating mechanism
-    
+
     Calculate the log likelihood of rates in an ion channel gating mechanism
     represented by a Q matrix given a sequence of idealized open and closed
     durations.
-    
+
     Parameters
     ----------
     params : array
@@ -38,20 +39,20 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
         Durations of sojourns in each state. The sojourns must alternate
         starting from the set of states A to set F and must end on a dwell
         in set F.
-    
+
     Returns
     -------
     ll : float
         The log likelihood of the rates
     """
-    
+
     if np.any(np.isnan(params)):
         # TODO: issue warning
         return np.nan
-    
+
     if q.ndim < 2 or q.shape[0] != q.shape[1]:
         raise ValueError("q matrix must be a square 2-d matrix")
-    
+
     ndwells = dwells.size / 2
     nstates = q.shape[0]
     qnew = np.zeros(nstates)
@@ -61,19 +62,19 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     qnew -= diag(qnew.sum(axis=1))
 
     # Number of multiples of tau to use for exact correction for missed events
-    mMax = 2 
+    mMax = 2
     Co, lambdas = cvals(qnew, A, F, tau, mMax)
     so, areaRo = asymptotic_r_vals(qnew, A, F, tau)
     if np.any(np.isinf(so)):
         # TODO: issue warning
         return np.nan
-    
+
     Cs, lambdas_cs = cvals(qnew, F, A, td, mMax)
     s_s, areaRs = asymptotic_r_vals(qnew, F, A, td)
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
         return np.nan
-    
+
     eqAAt = scipy.linalg.expm(qnew[np.ix_(A,A)] * tau)
     eqFFt = scipy.linalg.expm(qnew[np.ix_(F,F)] * tau)
     phiA = phi(qnew, A, F, tau)
@@ -99,7 +100,7 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
               @ qnew[np.ix_(F,A)] @ eqAAt
         scalefactor[ii] = 1.0 / sum(p)
         p *= scalefactor[ii]
-    
+
     ll = -(-sum(np.log10(scalefactor)))
 
     return ll
@@ -107,12 +108,12 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
 def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
                           tau, tcrit, dwells):
     """Log likelihood of rates in a gating mechanism from bursts of activity
-    
+
     Calculate the log likelihood of rates in an ion channel gating mechanism
     represented by a Q matrix given a series of sequences of idealized
     open and closed durations. Each burst in the series of idealized sequences
     is assumed to be separated by a critical time duration, `tcrit`.
-    
+
     Parameters
     ----------
     params : array
@@ -140,43 +141,43 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
         in set F. Each element of the list corresponds to one burst of ion
         channel activity, and the elements of the list are assumed to be
         separated by at least `tcrit`.
-    
+
     Returns
     -------
     ll : float
         The log likelihood of the rates
     """
-    
+
     if np.any(np.isnan(params)):
         # TODO: issue warning
         return np.nan
-    
+
     if q.ndim < 2 or q.shape[0] != q.shape[1]:
         raise ValueError("q matrix must be a square 2-d matrix")
-    
+
     n_bursts = len(dwells)
     n_states = q.shape[0]
     qnew = np.zeros_like(q)
-    
+
     theta = M @ params + b
     qnew[idxtheta] = 10.0 ** theta
     qnew -= np.diag(qnew.sum(axis=1))
-    
+
     # Number of multiples of tau to use for exact correction for missed events
     mMax = 2
-    
+
     Co, lambdas = cvals(qnew, A, F, tau, mMax)
     so, areaRo = asymptotic_r_vals(qnew, A, F, tau)
     if np.any(np.isinf(so)):
         # TODO: issue warning
         return np.nan
-    
+
     Cs, lambdas_cs = cvals(qnew, F, A, td, mMax)
     s_s, areaRs = asymptotic_r_vals(qnew, F, A, td)
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
         return np.nan
-    
+
     eqAAt = scipy.linalg.expm(qnew[np.ix_(A,A)] * tau)
     eqFFt = scipy.linalg.expm(qnew[np.ix_(F,F)] * tau)
 
@@ -216,25 +217,25 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
 
 def constrain_qr(gamma, idxall, idxvary):
     """QR factorization to separate free from constrained rates
-    
+
     Given a set of constraints, gamma, on the log10-transformed rates in a
     gating mechanism, theta, such that gamma @ theta == xi, where xi is a
     constant vector, this function will partition gamma into the
     contrained rates, R1, and the free rates, R2.
-    
+
     If the linear constraints on all the parameters mu, where
     mu(i,j) = log10(q(i,j)), are represented in the matrix gamma and
                               gamma * theta = xi
     where theta = (...mu(i,j)...)' and xi is a constant vector
     Then theta can be formulated into linear combinations of
     unconstrained variables using the QR factorization of gamma
-    
+
     It is assumed the constraints are independent of one another, which means
     gamma has full rank
-    
-    See Qin et al. 1996 Biophys J or 
+
+    See Qin et al. 1996 Biophys J or
     Golub and Van Loan 1989 Matrix Computations
-    
+
     Parameters
     ----------
     gamma : 2-d array
@@ -243,7 +244,7 @@ def constrain_qr(gamma, idxall, idxvary):
         pass
     idxvary : array
         pass
-    
+
     Returns
     -------
     U : 2-d array
@@ -255,17 +256,17 @@ def constrain_qr(gamma, idxall, idxvary):
     idxconstrain : array
     n_constrain : float
     """
-    
+
     if not isinstance(idxall, np.ndarray):
         raise ValueError("idxall must be a numpy array")
     if not isinstance(idxvary, np.ndarray):
         raise ValueError("idxvary must be a numpy array")
-    
+
     if idxall.ndim != 1:
         raise ValueError("idxall must be 1-d")
     if idxvary.ndim != 1:
         raise ValueError("idxvary must be 1-d")
-    
+
     n_rates = idxall.size
     n_vary = idxvary.size
     n_constrain = n_rates-n_vary
@@ -280,7 +281,7 @@ def constrain_qr(gamma, idxall, idxvary):
     idxconstrain = np.setdiff1d(idxall, idxvary)
     if idxconstrain.size != n_constrain:
         raise ValueError('Number of constraints does not match.')
-    
+
     idxtheta = np.concatenate((idxconstrain, idxvary))
     # Note that theta == log10(q(idxtheta));
     mask = np.isin(idxtheta, idxall)
@@ -293,13 +294,31 @@ def constrain_qr(gamma, idxall, idxvary):
     U, R = scipy.linalg.qr(new_gamma)
     R1 = R[:, :n_constrain]
     R2 = R[:, n_constrain:]
-    
+
     return U, R1, R2, idxtheta, new_gamma, R, idxconstrain, n_constrain
+
+def _sub2ind_v1(shape, i, j):
+    tmp = np.zeros(shape, dtype='int')
+    tmp[(i, j)] = 1
+    return tmp.ravel().nonzero()[0]
+
+def _sub2ind(shape, i, j):
+    n_rows, n_cols = shape
+    return n_cols*i + j
+
+def _mst_path(csgraph, predecessors, start, end):
+    """Construct a path along the minimum spanning tree"""
+    preds = predecessors[start]
+    path = [end]
+    while end != start:
+        end = preds[start, end]
+        path.append(end)
+    return path[::-1]
 
 def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
                    gamma=None, xi=None):
     """Find rates to fix for microscopic reversibility
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -313,10 +332,10 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         Set of constraints on the rate constants
     xi : 1-d array
         A column array of constants for the linear constraints
-    
+
     Returns
     -------
-    
+
     Notes
     -----
     1) Create an undirected graph of Q (with the physical constrains from
@@ -333,7 +352,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
        constrained Q matrix [undirected])
 
        a) Do so in such a way that
-          
+
           weight = 1 for edges (i.e. connections) to be included in the
           minimum spanning tree. These connections will be set by physical
           constraints (and not microscopic reversibility, if possible)
@@ -351,10 +370,10 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     4) Find the unique shortest path (I assume this is guaranteed to exist in
        a minimum spanning tree) between each pair of states connected by an edge
        that is not in the MST
-       
+
        a) These paths will determine which cycle to use for the constrain
     """
-    
+
     if not idxconstrain is None and not gamma is None:
         nrows, ncols = gamma.size
         gamma_rank = scipy.linalg.matrix_rank(gamma)
@@ -367,7 +386,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         idxConstrain = []
         Gamma = []
         Xi = []
-    
+
     if idxmr is None:
         idxmr = []
 
@@ -378,7 +397,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
             'Some constraints are set by physical constraints '
             'and microscopic reversibility'
         )
-    
+
     # Check that all connections between vertices are bi-directional
     # This should be equivalent to testing if a boolean version of
     # the matrix is symmetric
@@ -386,7 +405,14 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         raise ValueError(
             "Connections between states in q must be bi-directional"
         )
-    
+
+    # Force diagonal of the Q matrix to be zero for purpose of finding MST
+    if np.count_nonzero(q.diagonal()) > 0:
+        warnings.warn("The diagonal elements of q were not all zero. "
+                      "They are being set to zero to find the minimum "
+                      "spanning tree.")
+        Q[np.eye(*q.shape, dtype=bool)] = 0
+
     # scipy.sparse.minimum_spanning_tree goes through the nodes in the
     # graph rowwise (I believe this is due to the way indices are stored
     # using CSR sparse format). Hence, if the graph has entries
@@ -396,8 +422,8 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     G = np.zeros_like(q)
     G[q!=0] = 2
     G[idxConstrain] = 1
-    G = np.min(G, G.T)
-    
+    G = np.minimum(G, G.T)
+
     # Assigning weights to connections the user wants fixed by microscopic
     # reversibility after the weights of connections fixed by physical
     # constraints could lead to non-independent constraints if some of the
@@ -405,39 +431,46 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     # rates fixed by MR could be set first to avoid this.
     n_states = q.shape[0]
     G[idxmr] = n_states
-    G = np.max(G, G.T)
-    
+    G = np.maximum(G, G.T)
+
     # The graph should have the same weights in the upper and lower triangles
     # but just in case, let's take the lower triangular portion
     G = np.tril(G)
 
-    MST = minimum_spanning_tree(G)
+    MST = scipy.sparse.csgraph.minimum_spanning_tree(G)
 
     # Let's just use the transitions in the lower triangular part of Q to fix for MR
     # Thus the rates to fix for microscopic reversibility are in the lower
     # triangular of Q but not in the minimum spanning tree
-    idxMR = np.nonzero(np.tril(q.astype(bool)) != MST.astype(bool))
-    
+    MR_initial_mask = np.tril(q.astype(bool)) != MST.astype(bool)
+
+    # Check that the user did not specify a rate to fix for microscopic
+    # reversibility that is in the upper triangular
+    mr_mask = np.zeros_like(q, dtype=bool)
+    mr_mask[idxmr] = True
+    mr_mask = np.triu(mr_mask)
+    MR_mask = (MR_initial_mask & ~mr_mask.T) | (mr_mask & MR_initial_mask.T)
+
+    idxMR = np.nonzero(MR_mask)
+
     # An alternative way, perhaps:
     # set(zip(idxMR[1], idxMR[0])).difference(zip(*idxmr))
     # now, we'd need the index of the overlap from idxMR ...
-    
+
+    distances, predecessors = scipy.sparse.csgraph.shortest_path(
+        MST, directed=False, indices=(ii, jj), return_predecessors=True
+    )
+
     for ii, jj in zip(*idxMR):
-        # Check that the user did not specify a rate to fix for microscopic
-        # reversibility that is in the upper triangular
-        if np.nonzero((idxmr[0] == j) & (idxmr[1] == i)).size > 0:
-            tmp = ii
-            ii = jj
-            jj = tmp
-            # Try to avoid modifying list in place
-            # idxMR(kk) = sub2ind(size(q),ii,jj);
-        
-        # [~, pth] = graphshortestpath(MST,ii,jj,'Directed',false);
-        # src = sub2ind(size(q), pth, circshift(pth,[0 -1]));
-        # tgt = sub2ind(size(q), fliplr(pth), circshift(fliplr(pth),[0 -1]));
+        pth = _mst_path(MST, predecessors, ii, jj)
+        pth_next = np.roll(pth, -1)
+        src = _sub2ind(q.shape, pth, pth_next)
+        rev_path = path[::-1]
+        rev_path_next = np.roll(rev_path, -1)
+        tgt = _sub2ind(q.shape, rev_path, rev_path_next)
         # [tmpg,tmpxi] = constrainrate(q,idxall,'loop',src,tgt);
         # Gamma=[Gamma;tmpg];
         # Xi=[Xi;tmpxi];
         # idxConstrain = [idxConstrain; idxMR(kk)];
-    
+
     return Gamma, Xi, idxConstrain, idxMR, MST
