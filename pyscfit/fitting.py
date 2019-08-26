@@ -297,11 +297,6 @@ def constrain_qr(gamma, idxall, idxvary):
 
     return U, R1, R2, idxtheta, new_gamma, R, idxconstrain, n_constrain
 
-def _sub2ind_v1(shape, i, j):
-    tmp = np.zeros(shape, dtype='int')
-    tmp[(i, j)] = 1
-    return tmp.ravel().nonzero()[0]
-
 def _sub2ind(shape, i, j):
     n_rows, n_cols = shape
     return n_cols*i + j
@@ -314,6 +309,81 @@ def _mst_path(csgraph, predecessors, start, end):
         end = preds[start, end]
         path.append(end)
     return path[::-1]
+
+def constrain_rate(q, idxall, source_idx, target_idx, type='fix', constant=1.0):
+    """Create linear constraint on rate constants in the Q matrix
+
+    This function returns a matrix, ``A``, of coefficients giving the linear
+    constraints on specified reate constants in the Q matrix and also returns
+    the equivalence column vector, ``B``, such that $A*\theta = B$ where
+    $\theta$ is a column vector of the rate constants.
+
+    Parameters
+    ----------
+    q : 2-d array
+        The Q matrix
+    idxall : 1-d array
+        Indices of all the rate constants that make up Q
+    source_idx : 1-d array
+        The indices of the source rate constants.  These are the
+        rate constants that are free to vary.  When type is 'fix', source_idx
+        is the indices of the rates that should be fixed to a certain value
+    target_idx : 1-d array
+        Indices of rate constants that will be constrained
+    type : str, {'fix', 'constrain', 'loop'}
+        The type of constraint, either 'fix', 'constrain', or 'loop'
+    constant : float, optional
+        Vector of the constants for the constraints. ``constrain_rate`` will
+        return the log10(c) in B.  If c is not given, it is assumed to be 1
+
+    Returns
+    -------
+    A : 2-d array
+        Coefficients giving the linear constraints on specified rate constants
+        in the Q matrix
+    B : 2-d array
+        A column vector of the equivalences
+    """
+
+    # For backwards compatability, allow either source_idx or target_idx to be
+    # used with the `fix' type
+
+    num_constraints = max(len(source_idx), len(target_idx))
+    if np.ndim(constant) == 0:
+        # constant is a scalar
+        constant = constant * np.ones(num_constrants)
+
+    if type == 'fit':
+        if source_idx.size == 0:
+            constraint_idx = target_idx
+        elif target_idx.size == 0:
+            constraint_idx = source_idx
+        else:
+            raise ValueError("Either `source_idx` or `target_idx` "
+                             "must not be empty")
+        A = np.zeros((constraint_idx.shape[0], idxall.size))
+        idx2 = _match(constraint_idx, idxall)
+        A[np.arange(len(idx2)), idx2] = 1
+        B = np.log10(constant).resize(-1, 1)
+    elif type == 'constrain':
+        A = np.zeros((source_idx.shape[0], idxall.size))
+        idx2 = _match(source_idx, idxall)
+        idx3 = _match(target_idx, idxall)
+        A[np.arange(num_constrants), idx2] = -1
+        A[np.arange(num_constrants), idx3] = 1
+        B = np.log10(constant).resize(-1, 1)
+    elif type == 'loop':
+        A = np.zeros((1, idxall.size))
+        idx2 = _match(np.concatenate((source_idx, target_idx), axis=-1),
+                      idxall)
+        A[0, idx2] = np.concatenate((np.ones(source_idx.size),
+                                     -1*np.ones(target_idx.size)))
+        B = np.log10(constant).resize(-1, 1)
+    else:
+        raise ValueError("`type` must be one of 'fit', 'constrain', or 'loop'")
+
+    return A, B
+
 
 def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
                    gamma=None, xi=None):
@@ -335,6 +405,16 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
 
     Returns
     -------
+    Gamma : 2-d array
+    Xi : 2-d array
+        A column vector of the equivalence values
+    idxConstrain : 1-d array
+        Indices of the rates to constrain
+    idxMR : tuple of arrays
+        Indices of the rates constrained by microscopic reversibility, as
+        returned by `np.nonzero`
+    MST : 2-d sparse array
+        The minimum spanning tree
 
     Notes
     -----
@@ -374,18 +454,19 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
        a) These paths will determine which cycle to use for the constrain
     """
 
-    if not idxconstrain is None and not gamma is None:
-        nrows, ncols = gamma.size
+    num_rates = q.shape[0]
+
+    if idxconstrain is not None and gamma is not None:
+        num_constraints, num_rates_gamma = gamma.size
         gamma_rank = scipy.linalg.matrix_rank(gamma)
-        if nrows > gamma_rank:
+        if num_constraints > gamma_rank:
             warnings.warn('The constraints on the rates in Q are not all independent')
-        idxConstrain = idxconstrain.copy()
-        Gamma = gamma.copy()
-        Xi = xi.copy()
+        if num_rates != num_rates_gamma:
+            raise ValueError("q had {} rates but gamma had {} rates".format(
+                num_rates, num_rates_gamma
+            ))
     else:
-        idxConstrain = []
-        Gamma = []
-        Xi = []
+        num_constraints = 0
 
     if idxmr is None:
         idxmr = []
@@ -421,7 +502,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     # of the connection in the upper triangle will be used.
     G = np.zeros_like(q)
     G[q!=0] = 2
-    G[idxConstrain] = 1
+    G[idxconstrain] = 1
     G = np.minimum(G, G.T)
 
     # Assigning weights to connections the user wants fixed by microscopic
@@ -452,6 +533,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     MR_mask = (MR_initial_mask & ~mr_mask.T) | (mr_mask & MR_initial_mask.T)
 
     idxMR = np.nonzero(MR_mask)
+    num_mr_constraints = idxMR[0].size
 
     # An alternative way, perhaps:
     # set(zip(idxMR[1], idxMR[0])).difference(zip(*idxmr))
@@ -461,16 +543,30 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         MST, directed=False, indices=(ii, jj), return_predecessors=True
     )
 
-    for ii, jj in zip(*idxMR):
+    Gamma = np.zeros((num_constrants + num_mr_constraints, num_rates))
+    idxConstrain = np.zeros(num_constrants + num_mr_constraints)
+    Xi = np.zeros((num_constrants + num_mr_constraints, 1))
+
+    Gamma[:num_constrants, :] = gamma
+    idxConstrain[:num_constrants, :] = idxconstrain
+    Xi[:num_constrants, :] = xi
+
+    for n, sub in enumerate(zip(*idxMR)):
+        ii, jj = sub
+
         pth = _mst_path(MST, predecessors, ii, jj)
         pth_next = np.roll(pth, -1)
         src = _sub2ind(q.shape, pth, pth_next)
+
         rev_path = path[::-1]
         rev_path_next = np.roll(rev_path, -1)
         tgt = _sub2ind(q.shape, rev_path, rev_path_next)
-        # [tmpg,tmpxi] = constrainrate(q,idxall,'loop',src,tgt);
-        # Gamma=[Gamma;tmpg];
-        # Xi=[Xi;tmpxi];
-        # idxConstrain = [idxConstrain; idxMR(kk)];
+
+        tmpg, tmpxi = constrain_rate(q, idxall, src, tgt, 'loop')
+
+        ind = num_constrants + n
+        Gamma[ind, :] = tmpg
+        Xi[ind, : ] = tmpxi
+        idxConstrain[ind, :] = _sub2ind(ii, jj)
 
     return Gamma, Xi, idxConstrain, idxMR, MST
