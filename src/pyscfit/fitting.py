@@ -9,6 +9,7 @@ from qmatrix import cvals, phi, R
 from asymptotic_r import asymptotic_r_vals, chs_vectors
 from utils import _match
 
+
 def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     """Log likelihood of rates in a gating mechanism
 
@@ -57,8 +58,8 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     nstates = q.shape[0]
     qnew = np.zeros(nstates)
 
-    theta = M@params + b
-    qnew[idxtheta] = 10.0**theta
+    theta = M @ params + b
+    qnew[idxtheta] = 10.0 ** theta
     qnew -= diag(qnew.sum(axis=1))
 
     # Number of multiples of tau to use for exact correction for missed events
@@ -75,8 +76,8 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
         # TODO: issue warning
         return np.nan
 
-    eqAAt = scipy.linalg.expm(qnew[np.ix_(A,A)] * tau)
-    eqFFt = scipy.linalg.expm(qnew[np.ix_(F,F)] * tau)
+    eqAAt = scipy.linalg.expm(qnew[np.ix_(A, A)] * tau)
+    eqFFt = scipy.linalg.expm(qnew[np.ix_(F, F)] * tau)
     phiA = phi(qnew, A, F, tau)
 
     # Calculation of the forward recursions, which are used to calculate the
@@ -89,15 +90,20 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     # likelihood estimation of aggregated Markov processes Proc R Soc Lond B
     # 264, 375-383
 
-    scalefactor = np.zeros((ndwells,1))
+    scalefactor = np.zeros((ndwells, 1))
     p = phiA
     for ii in np.arange(ndwells):
-        t1 = np.abs(dwells[2*ii-1] - tau)
-        t2 = np.abs(dwells[2*ii] - tau)
-        p = p @ R(Co, lambdas, tau, so, areaRo, mMax, t1) \
-              @ qnew[np.ix_(A,F)] @ eqFFt \
-              @ R(Cs, lambdas, tau, s_s, areaRs, mMax, t2) \
-              @ qnew[np.ix_(F,A)] @ eqAAt
+        t1 = np.abs(dwells[2 * ii - 1] - tau)
+        t2 = np.abs(dwells[2 * ii] - tau)
+        p = (
+            p
+            @ R(Co, lambdas, tau, so, areaRo, mMax, t1)
+            @ qnew[np.ix_(A, F)]
+            @ eqFFt
+            @ R(Cs, lambdas, tau, s_s, areaRs, mMax, t2)
+            @ qnew[np.ix_(F, A)]
+            @ eqAAt
+        )
         scalefactor[ii] = 1.0 / sum(p)
         p *= scalefactor[ii]
 
@@ -105,8 +111,8 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
 
     return ll
 
-def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
-                          tau, tcrit, dwells):
+
+def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
     """Log likelihood of rates in a gating mechanism from bursts of activity
 
     Calculate the log likelihood of rates in an ion channel gating mechanism
@@ -178,8 +184,8 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
         # TODO: issue warning
         return np.nan
 
-    eqAAt = scipy.linalg.expm(qnew[np.ix_(A,A)] * tau)
-    eqFFt = scipy.linalg.expm(qnew[np.ix_(F,F)] * tau)
+    eqAAt = scipy.linalg.expm(qnew[np.ix_(A, A)] * tau)
+    eqFFt = scipy.linalg.expm(qnew[np.ix_(F, F)] * tau)
 
     # Calculation of the forward recursions, which are used to calculate the
     # likelihood, will run into numerical problems because the probabilities
@@ -188,7 +194,7 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
     # continually scale the inital probability vector (see Rabiner 1989
     # and Qin et al (1997) Proc R Soc Lond B
 
-    phib, ef = chs_vectors(qnew, A, F, areaRs, -1/s_s, tau, tcrit)
+    phib, ef = chs_vectors(qnew, A, F, areaRs, -1 / s_s, tau, tcrit)
     LL = np.zeros(n_bursts)
     for ii in np.arange(n_bursts):
         tmpdwells = dwells[ii]
@@ -199,21 +205,28 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F,
         for jj in np.arange(numdwells):
             dwell_time = tmpdwells[jj] - tau
             if j % 2 == 0:
-                pF = pA @ R(Co,lambdas,tau,so,areaRo,mMax,dwell_time) \
-                        @ qnew[np.ix_(A,F)] \
-                        @ eqFFt
-                scalefactor[jj] = 1./sum(pF)
+                pF = (
+                    pA
+                    @ R(Co, lambdas, tau, so, areaRo, mMax, dwell_time)
+                    @ qnew[np.ix_(A, F)]
+                    @ eqFFt
+                )
+                scalefactor[jj] = 1.0 / sum(pF)
                 pF *= scalefactor[jj]
             else:
-                pA = pF @ R(Cs,lambdas,tau,s_s,areaRs,mMax,dwell_time) \
-                        @ qnew[np.ix_(F,A)] \
-                        @ eqAAt
-                scalefactor[jj] = 1./sum(pA)
+                pA = (
+                    pF
+                    @ R(Cs, lambdas, tau, s_s, areaRs, mMax, dwell_time)
+                    @ qnew[np.ix_(F, A)]
+                    @ eqAAt
+                )
+                scalefactor[jj] = 1.0 / sum(pA)
                 pA *= scalefactor[jj]
         LL[ii] = -sum(np.log10(scalefactor)) + log10(pF @ ef)
     ll = -sum(LL)
 
     return ll
+
 
 def constrain_qr(gamma, idxall, idxvary):
     """QR factorization to separate free from constrained rates
@@ -269,7 +282,7 @@ def constrain_qr(gamma, idxall, idxvary):
 
     n_rates = idxall.size
     n_vary = idxvary.size
-    n_constrain = n_rates-n_vary
+    n_constrain = n_rates - n_vary
 
     # Need to generate theta such that theta = log10([q(idxconstrain); q(idxvary)]);
     # Generating theta doesn't actually need to be done here, but we need to
@@ -280,7 +293,7 @@ def constrain_qr(gamma, idxall, idxvary):
 
     idxconstrain = np.setdiff1d(idxall, idxvary)
     if idxconstrain.size != n_constrain:
-        raise ValueError('Number of constraints does not match.')
+        raise ValueError("Number of constraints does not match.")
 
     idxtheta = np.concatenate((idxconstrain, idxvary))
     # Note that theta == log10(q(idxtheta));
@@ -297,9 +310,11 @@ def constrain_qr(gamma, idxall, idxvary):
 
     return U, R1, R2, idxtheta, new_gamma, R, idxconstrain, n_constrain
 
+
 def _sub2ind(shape, i, j):
     n_rows, n_cols = shape
-    return n_cols*i + j
+    return n_cols * i + j
+
 
 def _mst_path(csgraph, predecessors, start, end):
     """Construct a path along the minimum spanning tree"""
@@ -310,7 +325,10 @@ def _mst_path(csgraph, predecessors, start, end):
         path.append(end)
     return path[::-1]
 
-def constrain_rate(q, idxall, source_idx, target_idx, type='fix', constant=1.0):
+
+def constrain_rate(
+    q, idxall, source_idx, target_idx, type="fix", constant=1.0
+):
     """Create linear constraint on rate constants in the Q matrix
 
     This function returns a matrix, ``A``, of coefficients giving the linear
@@ -353,31 +371,34 @@ def constrain_rate(q, idxall, source_idx, target_idx, type='fix', constant=1.0):
         # constant is a scalar
         constant = constant * np.ones(num_constrants)
 
-    if type == 'fit':
+    if type == "fit":
         if source_idx.size == 0:
             constraint_idx = target_idx
         elif target_idx.size == 0:
             constraint_idx = source_idx
         else:
-            raise ValueError("Either `source_idx` or `target_idx` "
-                             "must not be empty")
+            raise ValueError(
+                "Either `source_idx` or `target_idx` " "must not be empty"
+            )
         A = np.zeros((constraint_idx.shape[0], idxall.size))
         idx2 = _match(constraint_idx, idxall)
         A[np.arange(len(idx2)), idx2] = 1
         B = np.log10(constant).resize(-1, 1)
-    elif type == 'constrain':
+    elif type == "constrain":
         A = np.zeros((source_idx.shape[0], idxall.size))
         idx2 = _match(source_idx, idxall)
         idx3 = _match(target_idx, idxall)
         A[np.arange(num_constrants), idx2] = -1
         A[np.arange(num_constrants), idx3] = 1
         B = np.log10(constant).resize(-1, 1)
-    elif type == 'loop':
+    elif type == "loop":
         A = np.zeros((1, idxall.size))
-        idx2 = _match(np.concatenate((source_idx, target_idx), axis=-1),
-                      idxall)
-        A[0, idx2] = np.concatenate((np.ones(source_idx.size),
-                                     -1*np.ones(target_idx.size)))
+        idx2 = _match(
+            np.concatenate((source_idx, target_idx), axis=-1), idxall
+        )
+        A[0, idx2] = np.concatenate(
+            (np.ones(source_idx.size), -1 * np.ones(target_idx.size))
+        )
         B = np.log10(constant).resize(-1, 1)
     else:
         raise ValueError("`type` must be one of 'fit', 'constrain', or 'loop'")
@@ -385,8 +406,9 @@ def constrain_rate(q, idxall, source_idx, target_idx, type='fix', constant=1.0):
     return A, B
 
 
-def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
-                   gamma=None, xi=None):
+def mr_constraints(
+    q, idxall, idxconstrain=None, idxmr=None, gamma=None, xi=None
+):
     """Find rates to fix for microscopic reversibility
 
     Parameters
@@ -460,11 +482,15 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         num_constraints, num_rates_gamma = gamma.size
         gamma_rank = scipy.linalg.matrix_rank(gamma)
         if num_constraints > gamma_rank:
-            warnings.warn('The constraints on the rates in Q are not all independent')
+            warnings.warn(
+                "The constraints on the rates in Q are not all independent"
+            )
         if num_rates != num_rates_gamma:
-            raise ValueError("q had {} rates but gamma had {} rates".format(
-                num_rates, num_rates_gamma
-            ))
+            raise ValueError(
+                "q had {} rates but gamma had {} rates".format(
+                    num_rates, num_rates_gamma
+                )
+            )
     else:
         num_constraints = 0
 
@@ -475,8 +501,8 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     # "Use `array.size > 0` to check that an array is not empty."
     if np.intersect1d(idxconstrain, idxmr).size < 1:
         raise ValueError(
-            'Some constraints are set by physical constraints '
-            'and microscopic reversibility'
+            "Some constraints are set by physical constraints "
+            "and microscopic reversibility"
         )
 
     # Check that all connections between vertices are bi-directional
@@ -489,9 +515,11 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
 
     # Force diagonal of the Q matrix to be zero for purpose of finding MST
     if np.count_nonzero(q.diagonal()) > 0:
-        warnings.warn("The diagonal elements of q were not all zero. "
-                      "They are being set to zero to find the minimum "
-                      "spanning tree.")
+        warnings.warn(
+            "The diagonal elements of q were not all zero. "
+            "They are being set to zero to find the minimum "
+            "spanning tree."
+        )
         Q[np.eye(*q.shape, dtype=bool)] = 0
 
     # scipy.sparse.minimum_spanning_tree goes through the nodes in the
@@ -501,7 +529,7 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
     # first find the entries in the upper triangle. Moreover, the weight
     # of the connection in the upper triangle will be used.
     G = np.zeros_like(q)
-    G[q!=0] = 2
+    G[q != 0] = 2
     G[idxconstrain] = 1
     G = np.minimum(G, G.T)
 
@@ -562,11 +590,11 @@ def mr_constraints(q, idxall, idxconstrain=None, idxmr=None,
         rev_path_next = np.roll(rev_path, -1)
         tgt = _sub2ind(q.shape, rev_path, rev_path_next)
 
-        tmpg, tmpxi = constrain_rate(q, idxall, src, tgt, 'loop')
+        tmpg, tmpxi = constrain_rate(q, idxall, src, tgt, "loop")
 
         ind = num_constrants + n
         Gamma[ind, :] = tmpg
-        Xi[ind, : ] = tmpxi
+        Xi[ind, :] = tmpxi
         idxConstrain[ind, :] = _sub2ind(ii, jj)
 
     return Gamma, Xi, idxConstrain, idxMR, MST

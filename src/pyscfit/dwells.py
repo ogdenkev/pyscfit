@@ -161,3 +161,7 @@ def dwt_read():
 
 def scan_read():
     raise NotImplementedError
+
+
+def montecarlo():
+    raise NotImplementedError

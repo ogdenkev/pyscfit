@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def _match(x, y):
     """Returns an array of the positions of (first) matches of y in x
     
@@ -19,12 +20,13 @@ def _match(x, y):
     yindex : 1-d array
         np.all(x[yindex] == y) should be True
     """
-    
+
     index = np.argsort(x)
     sorted_index = np.searchsorted(x, y, sorter=index)
     yindex = index[sorted_index]
-    
+
     return yindex
+
 
 def _match_hash(x, y, no_match=None):
     """Returns an array of the positions of (first) matches of y in x
@@ -34,8 +36,8 @@ def _match_hash(x, y, no_match=None):
     As in R's `match`, a hash (i.e. dictionary) is built to do the
     mapping.
     """
-    
+
     x_val2ind = {v: i for i, v in enumerate(x)}
     y_ind = [x_val2ind.get(v, no_match) for v in y]
-    
+
     return y_ind
