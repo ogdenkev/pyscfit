@@ -3,8 +3,10 @@
 import numpy as np
 import scipy.linalg
 
+from .qmatrix import equilibrium_occupancy
 
-def imposeres(dwells, states, openres, shutres):
+
+def impose_res(dwells, states, openres, shutres):
     """Impose resolutions for sojourns in an idealized channel recording
 
     Parameters
@@ -95,7 +97,7 @@ def fix_shut_amps(dwells, states, zero_amp=0.0):
     return np.array(zero_amp_dwells), np.array(zero_amp_states)
 
 
-def concatdwells(dwells, states, tol=np.inf, mode="first"):
+def concat_dwells(dwells, states, tol=np.inf, mode="first"):
     """Concatenate contiguous open and closed durations
     
     Parameters
@@ -163,5 +165,78 @@ def scan_read():
     raise NotImplementedError
 
 
-def montecarlo():
-    raise NotImplementedError
+def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
+    """Simulate a continuous time Markov process governed by Q matrix
+    
+    A sequence of dwell times is produced in Monte Carlo fashion
+    
+    Parameters
+    ----------
+    q : 2-d array
+        Q matrix -- cannot vary with time
+    A : 1-d array
+        Array of indices of the open (or up) state
+    F : 1-d array
+        Array of indices of the closed (or down) state
+    n : int
+        The number of transitions to simulate
+    ini_state : int, optional
+        The initial state of the system
+    seed : {None, int, array_like[ints], ISeedSequence,
+    BitGenerator, Generator}, optional
+        Seed to use with numpy.random.default_rng()
+    
+    Returns
+    -------
+    dwells : 1-d array
+        The simulated dwell times
+    states : 1-d array
+        The states corresponding to the dwell times, values of
+        0 = shut (or down) and values of 1 = open (or up)
+    """
+
+    n_states = q.shape[0]
+    i_all_states = np.arange(n_states)
+    rg = numpy.random.default_rng(seed)
+
+    if (A.size + F.size) != n_states:
+        raise ValueError(
+            "Q had {} states but only {} states found in A and F".format(
+                n_states, A.size + F.size
+            )
+        )
+
+    dwells = np.zeros((n, 1))
+    states = np.full((n, 1), np.nan)
+
+    if ini_state is None:
+        p0 = equilibrium_occupancy(q)
+        die = np.random.rand()
+        state = np.nonzero(die <= np.cumsum(p0))[0][0]
+    else:
+        state = ini_state
+
+    if state in A:
+        current_class = A
+        current_amplitude = 1
+    elif state in F:
+        current_class = F
+        current_amplitude = 0
+    else:
+        raise ValueError("Current state not in A or F")
+
+    for ii in range(n):
+        while state in current_class:
+            time = rg.exponential(-1 / q[state, state])
+            dwells[ii] += time
+            not_state = np.setdiff1d(i_all_states, state)
+            pt = q[np.ix_(state, not_state)]
+            pt /= sum(pt)
+            die = np.random.rand()
+            ind = np.nonzero(die <= np.cumsum(pt))[0][0]
+            state = not_state[ind]
+
+        states[ii] = current_amplitude
+        current_amplitue ^= 1
+
+    return dwells, states

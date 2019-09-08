@@ -6,7 +6,7 @@ import scipy.linalg
 import scipy.optimize
 import numpy as np
 
-from qmatrix import phi
+from .qmatrix import phi
 
 
 def asymptotic_r_vals(q, A, F, tau):

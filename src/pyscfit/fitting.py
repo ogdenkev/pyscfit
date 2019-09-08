@@ -5,9 +5,9 @@ import numpy as np
 import scipy.linalg
 import scipy.sparse.csgraph
 
-from qmatrix import cvals, phi, R
-from asymptotic_r import asymptotic_r_vals, chs_vectors
-from utils import _match
+from .qmatrix import cvals, phi, R
+from .asymptotic_r import asymptotic_r_vals, chs_vectors
+from .utils import _match
 
 
 def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
