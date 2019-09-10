@@ -196,7 +196,6 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
     """
 
     n_states = q.shape[0]
-    i_all_states = np.arange(n_states)
     
     if (A.size + F.size) != n_states:
         raise ValueError(
@@ -205,7 +204,7 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
             )
         )
 
-    rg = numpy.random.default_rng(seed)
+    rg = np.random.default_rng(seed)
     
     def get_random_vals(generator=rg, q=q, batch_size=n_states):
         norm_vals = generator.random(size=batch_size)
@@ -228,6 +227,10 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
     else:
         state = ini_state
 
+    prob_t = q.copy()
+    prob_t[np.eye(n_states, dtype=np.bool_)] = 0
+    prob_t = np.cumsum(prob_t / prob_t.sum(axis=1, keepdims=True), axis=1)
+    
     if state in A:
         current_class = A
         current_amplitude = 1
@@ -243,20 +246,24 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
             ind_rand_dwell[state] += 1
             dwells[ii] += time
             
-            not_state = np.setdiff1d(i_all_states, state)
-            pt = q[state, not_state]
-            pt /= sum(pt)
+            pt = prob_t[state]
             
             die = die_rolls[ind_roll]
             ind_roll += 1
             
-            ind = np.nonzero(die <= np.cumsum(pt))[0][0]
-            state = not_state[ind]
+            for ind, p in enumerate(pt):
+                if ind == state:
+                    continue
+                if die <= p:
+                    break
+
+            state = ind
             
             if ind_roll >= n_states or ind_rand_dwell[state] >= n_states:
                 die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = get_random_vals()
 
         states[ii] = current_amplitude
-        current_amplitue ^= 1
+        current_amplitude ^= 1
+        current_class = A if state in A else F
 
     return dwells, states
