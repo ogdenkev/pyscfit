@@ -197,8 +197,7 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
 
     n_states = q.shape[0]
     i_all_states = np.arange(n_states)
-    rg = numpy.random.default_rng(seed)
-
+    
     if (A.size + F.size) != n_states:
         raise ValueError(
             "Q had {} states but only {} states found in A and F".format(
@@ -206,12 +205,25 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
             )
         )
 
+    rg = numpy.random.default_rng(seed)
+    
+    def get_random_vals(generator=rg, q=q, batch_size=n_states):
+        norm_vals = generator.random(size=batch_size)
+        ind_norm = 0
+        exp_vals = [generator.exponential(scale=-1 / v, size=batch_size) for v in np.diagonal(q)]
+        ind_exp = [0] * np.diagonal(q).size
+
+        return norm_vals, ind_norm, exp_vals, ind_exp
+
+    die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = get_random_vals()
+
     dwells = np.zeros((n, 1))
     states = np.full((n, 1), np.nan)
 
     if ini_state is None:
         p0 = equilibrium_occupancy(q)
-        die = np.random.rand()
+        die = die_rolls[ind_roll]
+        ind_roll += 1
         state = np.nonzero(die <= np.cumsum(p0))[0][0]
     else:
         state = ini_state
@@ -227,14 +239,22 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
 
     for ii in range(n):
         while state in current_class:
-            time = rg.exponential(-1 / q[state, state])
+            time = random_dwell_times[state][ind_rand_dwell[state]]
+            ind_rand_dwell[state] += 1
             dwells[ii] += time
+            
             not_state = np.setdiff1d(i_all_states, state)
-            pt = q[np.ix_(state, not_state)]
+            pt = q[state, not_state]
             pt /= sum(pt)
-            die = np.random.rand()
+            
+            die = die_rolls[ind_roll]
+            ind_roll += 1
+            
             ind = np.nonzero(die <= np.cumsum(pt))[0][0]
             state = not_state[ind]
+            
+            if ind_roll >= n_states or ind_rand_dwell[state] >= n_states:
+                die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = get_random_vals()
 
         states[ii] = current_amplitude
         current_amplitue ^= 1
