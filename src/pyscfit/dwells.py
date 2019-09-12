@@ -1,12 +1,14 @@
 """Functions for processing dwell times"""
 
+import itertools
+
 import numpy as np
 import scipy.linalg
 
 from .qmatrix import equilibrium_occupancy
 
 
-def impose_res(dwells, states, openres, shutres):
+def impose_res(dwells, states, openres, shutres, return_unresolved_inds=False):
     """Impose resolutions for sojourns in an idealized channel recording
 
     Parameters
@@ -55,7 +57,13 @@ def impose_res(dwells, states, openres, shutres):
                 unresolved_time = sum(sojourn_times)
                 resolved_dwells[-1] += unresolved_time
 
-    return resolved_dwells, resolved_states, unresolved_inds
+    resolved_dwells = np.array(resolved_dwells)
+    resolved_states = np.array(resolved_states)
+
+    if return_unresolved_inds:
+        return resolved_dwells, resolved_states, unresolved_inds
+    else:
+        return resolved_dwells, resolved_states
 
 
 def fix_shut_amps(dwells, states, zero_amp=0.0):
@@ -97,7 +105,7 @@ def fix_shut_amps(dwells, states, zero_amp=0.0):
     return np.array(zero_amp_dwells), np.array(zero_amp_states)
 
 
-def concat_dwells(dwells, states, tol=np.inf, mode="first"):
+def concat_dwells(dwells, states, tol=0.1, mode="first"):
     """Concatenate contiguous open and closed durations
     
     Parameters
@@ -106,10 +114,13 @@ def concat_dwells(dwells, states, tol=np.inf, mode="first"):
     states : 1-d array
     tol : float, optional
         The difference in picoamperes beyond which two adjacent states
-        are considered to be distinct. By default any two wells with
-        different amplitudes will be combined. If `tol` is specified then
-        only adjacent dwells whose amplitudes differ by less than or
-        equal to `tol` will be combined.
+        are considered to be distinct. Only adjacent dwells whose amplitudes
+        differ by strictly less than `tol` will be combined.
+    mode : {'first', 'mean'}, optional
+        The strategy to combine amplitudes when dwells are concatenated.
+        If mode is 'first' (the default), then only the amplitude of the
+        first event is kept; other amplitudes are discarded. If 'mean', then
+        the average amplitude from all concatenated events is kept.
     
     Returns
     -------
@@ -149,6 +160,9 @@ def concat_dwells(dwells, states, tol=np.inf, mode="first"):
             current_dwell = dwells[i + 1]
             current_state = states[i + 1]
             n_concat = 1
+
+    concatenated_dwells.append(current_dwell)
+    concatenated_states.append(current_state / n_concat)
 
     return np.array(concatenated_dwells), np.array(concatenated_states)
 
@@ -196,7 +210,8 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
     """
 
     n_states = q.shape[0]
-    
+    batch_size = (n_states * 2 * n, n)
+
     if (A.size + F.size) != n_states:
         raise ValueError(
             "Q had {} states but only {} states found in A and F".format(
@@ -205,19 +220,22 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
         )
 
     rg = np.random.default_rng(seed)
-    
-    def get_random_vals(generator=rg, q=q, batch_size=n_states):
-        norm_vals = generator.random(size=batch_size)
+
+    def get_random_vals(generator=rg, q=q, batch_size=batch_size):
+        norm_vals = generator.random(size=batch_size[0])
         ind_norm = 0
-        exp_vals = [generator.exponential(scale=-1 / v, size=batch_size) for v in np.diagonal(q)]
+        exp_vals = [
+            generator.exponential(scale=-1 / v, size=batch_size[1])
+            for v in np.diagonal(q)
+        ]
         ind_exp = [0] * np.diagonal(q).size
 
         return norm_vals, ind_norm, exp_vals, ind_exp
 
     die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = get_random_vals()
 
-    dwells = np.zeros((n, 1))
-    states = np.full((n, 1), np.nan)
+    dwells = np.zeros(n)
+    states = np.full(n, np.nan)
 
     if ini_state is None:
         p0 = equilibrium_occupancy(q)
@@ -230,7 +248,7 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
     prob_t = q.copy()
     prob_t[np.eye(n_states, dtype=np.bool_)] = 0
     prob_t = np.cumsum(prob_t / prob_t.sum(axis=1, keepdims=True), axis=1)
-    
+
     if state in A:
         current_class = A
         current_amplitude = 1
@@ -245,12 +263,12 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
             time = random_dwell_times[state][ind_rand_dwell[state]]
             ind_rand_dwell[state] += 1
             dwells[ii] += time
-            
+
             pt = prob_t[state]
-            
+
             die = die_rolls[ind_roll]
             ind_roll += 1
-            
+
             for ind, p in enumerate(pt):
                 if ind == state:
                     continue
@@ -258,9 +276,14 @@ def monte_carlo_dwells(q, A, F, n, ini_state=None, seed=None):
                     break
 
             state = ind
-            
-            if ind_roll >= n_states or ind_rand_dwell[state] >= n_states:
-                die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = get_random_vals()
+
+            if (
+                ind_roll >= batch_size[0]
+                or ind_rand_dwell[state] >= batch_size[1]
+            ):
+                die_rolls, ind_roll, random_dwell_times, ind_rand_dwell = (
+                    get_random_vals()
+                )
 
         states[ii] = current_amplitude
         current_amplitude ^= 1
