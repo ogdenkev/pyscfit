@@ -7,7 +7,7 @@ import scipy.sparse.csgraph
 
 from .qmatrix import cvals, phi, R
 from .asymptotic_r import asymptotic_r_vals, chs_vectors
-from .utils import _match
+from .utils import _match_hash
 
 
 def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
@@ -327,7 +327,7 @@ def _mst_path(csgraph, predecessors, start, end):
 
 
 def constrain_rate(
-    q, idxall, source_idx, target_idx, type="fix", constant=1.0
+    idxall, source_idx, target_idx=None, type="fix", constant=1.0
 ):
     """Create linear constraint on rate constants in the Q matrix
 
@@ -338,16 +338,15 @@ def constrain_rate(
 
     Parameters
     ----------
-    q : 2-d array
-        The Q matrix
-    idxall : 1-d array
-        Indices of all the rate constants that make up Q
-    source_idx : 1-d array
-        The indices of the source rate constants.  These are the
+    idxall : tuple
+        Indices of all the rate constants that make up Q as a tuple of arrays,
+        one for each dimension of Q. numpy.nonzero returns such a tuple.
+    source_idx : tuple
+        The indices of the source rate constants as a tuple of arrays. These are the
         rate constants that are free to vary.  When type is 'fix', source_idx
         is the indices of the rates that should be fixed to a certain value
     target_idx : 1-d array
-        Indices of rate constants that will be constrained
+        Indices of rate constants that will be constrained as a tuple of arrays
     type : str, {'fix', 'constrain', 'loop'}
         The type of constraint, either 'fix', 'constrain', or 'loop'
     constant : float, optional
@@ -363,47 +362,49 @@ def constrain_rate(
         A column vector of the equivalences
     """
 
-    # For backwards compatability, allow either source_idx or target_idx to be
-    # used with the `fix' type
-
-    num_constraints = max(len(source_idx), len(target_idx))
+    num_rates = len(idxall[0])
+    num_constraints = len(source_idx[0])
     if np.ndim(constant) == 0:
         # constant is a scalar
-        constant = constant * np.ones(num_constrants)
+        constant = constant * np.ones(num_constraints)
 
-    if type == "fit":
-        if source_idx.size == 0:
-            constraint_idx = target_idx
-        elif target_idx.size == 0:
-            constraint_idx = source_idx
-        else:
+    if type == "fix":
+        A = np.zeros((num_constraints, num_rates))
+        idx2 = _match_hash(zip(*idxall), zip(*source_idx))
+        A[np.arange(num_constraints), idx2] = 1
+        B = np.log10(constant).reshape(-1, 1)
+
+        return A, B
+
+    if type == "constrain":
+        if len(target_idx[0]) != num_constraints:
             raise ValueError(
-                "Either `source_idx` or `target_idx` " "must not be empty"
+                "The number of source and target rates for constraint must be equal"
             )
-        A = np.zeros((constraint_idx.shape[0], idxall.size))
-        idx2 = _match(constraint_idx, idxall)
-        A[np.arange(len(idx2)), idx2] = 1
-        B = np.log10(constant).resize(-1, 1)
-    elif type == "constrain":
-        A = np.zeros((source_idx.shape[0], idxall.size))
-        idx2 = _match(source_idx, idxall)
-        idx3 = _match(target_idx, idxall)
+
+        A = np.zeros((num_constraints, num_rates))
+        idx2 = _match_hash(zip(*idxall), zip(*source_idx))
+        idx3 = _match_hash(zip(*idxall), zip(*target_idx))
         A[np.arange(num_constrants), idx2] = -1
         A[np.arange(num_constrants), idx3] = 1
-        B = np.log10(constant).resize(-1, 1)
-    elif type == "loop":
-        A = np.zeros((1, idxall.size))
-        idx2 = _match(
-            np.concatenate((source_idx, target_idx), axis=-1), idxall
-        )
-        A[0, idx2] = np.concatenate(
-            (np.ones(source_idx.size), -1 * np.ones(target_idx.size))
-        )
-        B = np.log10(constant).resize(-1, 1)
-    else:
-        raise ValueError("`type` must be one of 'fit', 'constrain', or 'loop'")
+        B = np.log10(constant).reshape(-1, 1)
 
-    return A, B
+        return A, B
+
+    if type == "loop":
+        A = np.zeros((1, num_rates))
+        idx2 = _match_hash(zip(*idxall), zip(*source_idx))
+        idx3 = _match_hash(zip(*idxall), zip(*target_idx))
+
+        idx = np.concatenate((idx2, idx3), axis=-1)
+        A[0, idx] = np.concatenate(
+            (np.ones(len(source_idx[0])), -1 * np.ones(len(target_idx[0])))
+        )
+        B = np.log10(constant).reshape(-1, 1)
+
+        return A, B
+
+    raise ValueError("`type` must be one of 'fit', 'constrain', or 'loop'")
 
 
 def mr_constraints(
