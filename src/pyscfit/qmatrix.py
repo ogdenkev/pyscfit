@@ -129,11 +129,11 @@ def cvals(q, A, F, td, mMax=2):
     
     Parameters
     ----------
-    q : matrix
+    q : 2-d array
         The Q-matrix
-    A : array
+    A : 1-d array
         Indices of states in Q matrix that are open states
-    F : array
+    F : 1-d array
         Indices of states in Q matrix that are shut states
     td : float
         Dead time or resolution

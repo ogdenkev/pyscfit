@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 import scipy.linalg
 import scipy.sparse.csgraph
+import scipy.optimize
 
 from .qmatrix import cvals, phi, R
 from .asymptotic_r import asymptotic_r_vals, chs_vectors
@@ -599,3 +600,123 @@ def mr_constraints(
         idxConstrain[ind, :] = _sub2ind(ii, jj)
 
     return Gamma, Xi, idxConstrain, idxMR, MST
+
+
+def fit_rates(
+    dwells, q, A, F, td, idx_all, idx_vary, gamma=None, xi=None, optimize=True
+):
+    """Full maximum likelihood estimation of the rate constants in Q
+    
+    The exact correction for missed events given by Hawkes, Jalali and
+    Colquhoun (1990) & Hawkes, Jalali, and Colquhoun (1992) is used to fit the
+    rates using the idealized sequence of openings and closings.
+    
+    Parameters
+    ----------
+    dwells : 1-d array
+        The idealized sequence of openings and closings. Currently, dwells
+        must start on an open state and finish with a shut state, and
+        alternate every dwell
+    q : 2-d array
+        Q matrix, a k-by-k matrix where k is the number of states and 
+        q[i, j] is the transition rate from state i to state j and
+        q[i, i] is a number such that the sum of each row is zero
+    A : 1-d array
+        Indices of states in Q that are open states
+    F : 1-d array
+        Indices of shut states in Q
+    td : float
+        The resolution imposed on the data (aka dead time)
+    idx_all : tuple
+        The indices of all the rate constants in Q as a tuple of arrays,
+        e.g. as returned by numpy.nonzero.
+    idx_vary : tuple
+        The indices of the rates in Q that are free to vary as a
+        tuple of arrays.
+    gamma : 2-d array, optional
+        A matrix of linear constraints on all the rates in Q
+    xi : 2-d array, optional
+        A column vector indicating the equalities for the linear constraints
+        in gamma
+    optimize : bool, optional
+        Whether to optimize the rates (default) or simply calculate them
+    
+    Returns
+    -------
+    params : 1-d array
+    log_likelihood : float
+    q_estimated : 2-d array
+    hessian : 2-d array
+    cov : 2-d array
+        The covariance matrix
+    cor : 2-d array
+        The correlation matrix?
+    history : ???
+    """
+
+    n_states = len(A) + len(F)
+    if q.shape[0] != q.shape[1]:
+        return ValueError("q must be square")
+    if q.shape[0] != n_states:
+        return ValueError(
+            "A and F had a total of {} states, but q was only {}-by-{}".format(
+                n_states, *q.shape
+            )
+        )
+
+    n_dwells = len(dwells) / 2
+
+    x0 = np.log10(q[idx_vary])
+    n_rates = len(idx_all[0])
+    n_vary = len(idx_vary[0])
+    n_constrain = n_rates - n_vary
+
+    if gamma is not None:
+        constrain = True
+        U, R1, R2, idx_theta = constrain_qr(gamma, idx_all, idx_vary)
+        M = np.concatenate(
+            (-1.0 * scipy.linalg.solve(R1, R2), np.eye(n_vary)), axis=-1
+        )
+        b = np.concatenate(
+            (
+                scipy.linalg.solve(R1, scipy.linalg.solve(U, xi)),
+                np.zeros((idx_vary, 1)),
+            ),
+            axis=-1,
+        )
+        # now q(idxtheta) == 10.^(M*x + b); where x are the variables to be optimized
+
+    ll_fun = qmatrix_loglik
+
+    if not optimize:
+        log_likelihood = -ll_fun(x0)
+        q_estimated = q.copy()
+        hessian = None
+        cov = None
+        cor = None
+        history = None
+
+        return x0, log_likelihood, q_estimated, hessian, cov, cor, history
+
+    results = scipy.optimize.minimize(ll_fun, x0, method="BFGS")
+    # params, ll, _, __, ___, hessian
+    if not results.success:
+        warnings.warn(results.message)
+
+    log_likelihood = -results.fun
+    cov = results.hess_inv  # scipy.linalg.inv(hessian)
+    denom = np.diag(cov).reshape(-1, 1)
+    denom = demon @ denom.T
+    cor = cov / np.sqrt(denom)
+
+    if constrain:
+        theta = M @ results.x + b
+    else:
+        theta = results.x
+
+    params = 10 ** results.x
+    q_estimated = np.zeros_like(q)
+    q_estimated[idx_theta] = np.pow(10, theta)
+    q_estimated -= np.diag(q_estimated.sum(axis=1))
+
+    return params, log_likelihood, q_estimated, results.hess, cov, cor, history
