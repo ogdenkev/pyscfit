@@ -408,7 +408,7 @@ def equilibrium_occupancy(q):
     a = np.concatenate((q, u), axis=1)
     b = np.concatenate((z, one), axis=1)
     
-    p_eq, res, rnk, s = scipy.lingalg.lstsq(a.T, b.T)
+    p_eq, res, rnk, s = scipy.linalg.lstsq(a.T, b.T)
     
     return p_eq.T
 
