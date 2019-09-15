@@ -1,12 +1,13 @@
-"""Functions to calculate values for the approximate solution to R(t)"""
+"""Dwell time probabilities and distributions"""
+
+import numpy as np
 
 # Need scipy>=1.2.0 for optimize.root_scalar
 import scipy.integrate
 import scipy.linalg
 import scipy.optimize
-import numpy as np
 
-from .qmatrix import phi
+from .qmatrix import qmatvals, cvals, phi
 
 
 def asymptotic_r_vals(q, A, F, tau):
@@ -37,7 +38,7 @@ def asymptotic_r_vals(q, A, F, tau):
     s : 1-d array
         The roots of the determinant of W(s), i.e det W(s) = 0.
     areaR : 3-d array
-        
+        ...
     r : 2-d array
         The left eigenvectors of H(s), where s are the roots of det W(s) and
         also eigenvalues of H(s). r is a solution to rW(s) = 0, ru=1, where
@@ -412,3 +413,169 @@ def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
     phib = scipy.linalg.solve(numer.T, denom.T).T
 
     return phib, ef
+
+
+def R(t, C, lambdas, tau, s, areaR, mMax=2):
+    """Calculate the value of the matrix function R(t)
+    
+    R(t) is a kind of reliability or survivor function, in which R(i,j)
+    gives the probability that a resolved open time, starting in state i,
+    has not yet finished and is currently in state j.  Another way to state
+    this is that R(i,j)[t] = the probability that 1)you're in state j and 
+    2)there has been no resolvable shut time during the interval 0 to t
+    given that you were in state i at time 0.
+ 
+    For details see Hawkes et al (1990, 1992)
+    
+    Parameters
+    ----------
+    C : array
+        C is used to calculate the exact value of R for times less than or
+        equal to twice the imposed resolution
+    lambdas : array
+        Eigenvalues of the Q matrix
+    tau : float
+        The imposed resolution
+    s : array
+        Generalized eigenvalues used for asymptotic approximation to R(t)
+        The s values can be calculated from the function asymptoticRvals 
+    areaR : array
+        The area of each exponential component given in s
+    t : float
+        The time at which to return R(t)
+    
+    Returns
+    -------
+    R : 2-d array
+        The reliability/survivor function R(t) evaluated at time t
+    """
+
+    TOL = 1e-12
+
+    nr, nc, _nd = areaR.shape
+    f = np.zeros((nr, nc))
+
+    if t < 0:
+        return f
+
+    if t <= mMax * tau:
+        # Exact correction for missed events
+        kA = lambdas.size
+        m = np.ceil(t / tau).astype(np.int_) - 1
+        if np.abs(t) < TOL:
+            m = 0
+
+        for i in range(m + 1):
+            for j in range(kA):
+                for k in range(i + 1):
+                    # Beware of the indexing!!!! KKO 140923
+                    f += np.real(
+                        (-1) ** i
+                        * C[:, :, j, i, k]
+                        * (t - i * tau) ** k
+                        * np.exp(-lambdas[j] * (t - i * tau))
+                    )
+    else:
+        # Approximate correction for missed events
+        kA = s.size
+        for i in range(kA):
+            f += np.real(np.exp(s[i] * t) * areaR[:, :, i])
+
+    return f
+
+
+def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
+    """Exact pdf for open (or shut) times for a gating mechanism
+    
+    Parameters
+    ----------
+    t : 1-d array
+        The times at which to return the pdf
+    q : 2-d array
+        The Q matrix
+    A : 1-d array
+        The open (or shut) states. To get the distribution of open times,
+        pass the open states. To get the shut time distribution, pass the
+        shut states.  Whichever one you don't pass here, pass to F.
+    F : 1-d array
+        The shut (or open) states
+    tau : float
+        The resolution imposed on the dwell times (aka dead time)
+    is_log : bool, optional
+        If True, `is_log` indicates that `t` is the logarithm of the
+        dwell times instead of the dwell times themselves.
+    
+    Returns
+    -------
+    pdf : 1-d array
+        The exact probability density function with a correction for missed
+        events.
+    
+    Notes
+    -----
+    The exact correction for missed events is described by Hawkes, Jalali,
+    and Colquhoun (1990) using the asymptotic approximation given by
+    Hawkes, Jalali, and Colquhoun (1992)
+    """
+
+    pdf = np.zeros_like(t)
+
+    # Calculation of the exact distribution may be numerically unstable for
+    # mMax > 5. At least for mechanisms with many states. -KKO 140923
+    mMax = 3
+
+    dwell_taus, lambdas, spec_mat = qmatvals(q)
+    C = cvals(q, A, F, tau, lambdas, spec_mat, mMax)
+    s, areaR, *_rvals = asymptotic_r_vals(q, A, F, tau)
+    if np.any(np.isinf(s)):
+        raise ValueError(
+            "Not all the roots of det(W) were found. "
+            "The asymptotic approximation of R is unreliable."
+        )
+
+    eqFFt = scipy.linalg.expm(q[np.ix_(F, F)] * tau)
+    uF = np.ones((len(F), 1))
+    phiA = phi(q, A, F, tau)
+    qAF = q[np.ix_(A, F)]
+
+    if is_log:
+        t = 10 ** t
+
+        post_vals = np.fromiter(
+            (
+                (
+                    phiA
+                    @ R(tt - tau, lambdas, tau, s, areaR, mMax)
+                    @ qAF
+                    @ eqFFt
+                    @ uF
+                ).squeeze()
+                for tt in t
+            )
+        )
+
+        pdf = np.log(10) * t * post_vals
+
+        # for ii in range(len(t)):
+        #     pdf[ii] = (
+        #         np.log(10)
+        #         * t[ii]
+        #         * phiA
+        #         @ R(t[ii] - tau, C, lambdas, tau, s, areaR, mMax)
+        #         @ qAF
+        #         @ eqFFt
+        #         @ uF
+        #     )
+        #
+        # return pdf
+
+    for ii in range(len(t)):
+        pdf[ii] = (
+            phiA
+            @ R(t[ii] - tau, C, lambdas, tau, s, areaR, mMax)
+            @ qAF
+            @ eqFFt
+            @ uF
+        )
+
+    return pdf

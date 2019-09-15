@@ -6,8 +6,8 @@ import scipy.linalg
 import scipy.sparse.csgraph
 import scipy.optimize
 
-from .qmatrix import qmatvals, cvals, phi, R
-from .asymptotic_r import asymptotic_r_vals, chs_vectors
+from .qmatrix import qmatvals, cvals, phi
+from .pdf import R, asymptotic_r_vals, chs_vectors
 from .utils import _match_hash
 
 
@@ -68,13 +68,21 @@ def qmatrix_loglik(params, n_states, idxtheta, M, b, A, F, tau, dwells):
     taus, lambdas, spectral_matrices = qmatvals(qnew)
 
     Co = cvals(qnew, A, F, tau, lambdas, spectral_matrices, mMax)
-    so, areaRo, *open_rvals = asymptotic_r_vals(qnew, A, F, tau)
+    try:
+        so, areaRo, *open_rvals = asymptotic_r_vals(qnew, A, F, tau)
+    except ValueError as err:
+        return np.nan
+
     if np.any(np.isinf(so)):
         # TODO: issue warning
         return np.nan
 
     Cs = cvals(qnew, F, A, tau, lambdas, spectral_matrices, mMax)
-    s_s, areaRs, *shut_rvals = asymptotic_r_vals(qnew, F, A, tau)
+    try:
+        s_s, areaRs, *shut_rvals = asymptotic_r_vals(qnew, F, A, tau)
+    except ValueError as err:
+        return np.nan
+
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
         return np.nan
@@ -628,7 +636,21 @@ class FitCallback:
 
 
 def fit_rates(
-    dwells, q, A, F, td, idx_all, idx_vary, gamma=None, xi=None, optimize=True
+    dwells,
+    q,
+    A,
+    F,
+    td,
+    idx_all,
+    idx_vary,
+    gamma=None,
+    xi=None,
+    optimize=True,
+    gtol=1e-5,
+    maxiter=None,
+    disp=True,
+    return_all=True,
+    callback="iter",
 ):
     """Full maximum likelihood estimation of the rate constants in Q
     
@@ -652,10 +674,10 @@ def fit_rates(
         Indices of shut states in Q
     td : float
         The resolution imposed on the data (aka dead time)
-    idx_all : tuple
+    idx_all : tuple of arrays
         The indices of all the rate constants in Q as a tuple of arrays,
         e.g. as returned by numpy.nonzero.
-    idx_vary : tuple
+    idx_vary : tuple of arrays
         The indices of the rates in Q that are free to vary as a
         tuple of arrays.
     gamma : 2-d array, optional
@@ -665,6 +687,19 @@ def fit_rates(
         in gamma
     optimize : bool, optional
         Whether to optimize the rates (default) or simply calculate them
+    gtol : float, optional
+        See `gtol` in scipy.optimize.minimize(method='bfgs')
+    maxiter : int or None, optional
+        Maximum number of iterations to perform. If None, then `maxiter` is
+        set to `len(idx_vary) * 500`
+    disp : bool, optional
+        See `disp` in scipy.optimize.minimize(method='bfgs')
+    return_all : bool, optional
+        Return a list of results at each iteration if True.
+    callback : 'iter' or 'plot' or callable, optional
+        The function to call at each iteration. It must be of the signature
+        `callback(xk)`, and it will be called with the current parameter
+        vector, `xk`. If 'iter', the current iteration will be printed.
     
     Returns
     -------
@@ -721,7 +756,17 @@ def fit_rates(
         return x0, log_likelihood, q_estimated, hess_inv, cov, cor, history
 
     # Callback to show the number of iterations
-    fit_callback = FitCallback()
+    if callback == "iter" or callback == "plot":
+        fit_callback = FitCallback()
+        cb_fun = fit_callback.counter_callback
+        if callback == "plot":
+            warnings.warn(
+                "'plot' callback is not implemented yet. Reverting to 'iter'"
+            )
+    elif callable(callback):
+        cb_fun = callback
+    else:
+        raise ValueError("callback must be 'iter' or a callable")
 
     # According to the scipy source code (optimize.py), the defaults used for
     # the BFGS method are
@@ -735,10 +780,14 @@ def fit_rates(
     # maxiter=None,
     # disp=False,
     # return_all=False,  -- whether or not to return all tested parameter combinations
+
+    if maxiter is None:
+        maxiter = len(x0) * 500
+
     options = {
-        "gtol": 1.0,
-        "maxiter": 10,  # len(x0) * 500,
-        "disp": True,
+        "gtol": gtol,
+        "maxiter": maxiter,
+        "disp": disp,
         "return_all": True,
     }
 
@@ -748,7 +797,7 @@ def fit_rates(
         args=ll_args,
         method="BFGS",
         options=options,
-        callback=fit_callback.counter_callback,
+        callback=cb_fun,
     )
 
     if not results.success:
