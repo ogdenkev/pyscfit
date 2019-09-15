@@ -6,12 +6,12 @@ import scipy.linalg
 import scipy.sparse.csgraph
 import scipy.optimize
 
-from .qmatrix import cvals, phi, R
+from .qmatrix import qmatvals, cvals, phi, R
 from .asymptotic_r import asymptotic_r_vals, chs_vectors
 from .utils import _match_hash
 
 
-def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
+def qmatrix_loglik(params, n_states, idxtheta, M, b, A, F, tau, dwells):
     """Log likelihood of rates in a gating mechanism
 
     Calculate the log likelihood of rates in an ion channel gating mechanism
@@ -22,8 +22,8 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
     ----------
     params : array
         The log10-transformed rates to vary
-    q : 2-d array
-        The Q matrix of transition probabilities
+    n_states : int
+        The number of total states in the Q matrix of transition probabilities
     idxtheta : array
         The indices of `q` that give all the rate constants
     M : 2-d array
@@ -52,27 +52,29 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
         # TODO: issue warning
         return np.nan
 
-    if q.ndim < 2 or q.shape[0] != q.shape[1]:
-        raise ValueError("q matrix must be a square 2-d matrix")
+    ndwells = dwells.size // 2
 
-    ndwells = dwells.size / 2
-    nstates = q.shape[0]
-    qnew = np.zeros(nstates)
+    qnew = np.zeros((n_states, n_states))
 
-    theta = M @ params + b
-    qnew[idxtheta] = 10.0 ** theta
-    qnew -= diag(qnew.sum(axis=1))
+    theta = M @ params.reshape(-1, 1) + b
+    theta = 10.0 ** theta.ravel()
+    qnew[idxtheta] = theta
+    qnew -= np.diag(qnew.sum(axis=1))
 
     # Number of multiples of tau to use for exact correction for missed events
     mMax = 2
-    Co, lambdas = cvals(qnew, A, F, tau, mMax)
-    so, areaRo = asymptotic_r_vals(qnew, A, F, tau)
+
+    # Intermediate calculations for R(t)
+    taus, lambdas, spectral_matrices = qmatvals(qnew)
+
+    Co = cvals(qnew, A, F, tau, lambdas, spectral_matrices, mMax)
+    so, areaRo, *open_rvals = asymptotic_r_vals(qnew, A, F, tau)
     if np.any(np.isinf(so)):
         # TODO: issue warning
         return np.nan
 
-    Cs, lambdas_cs = cvals(qnew, F, A, td, mMax)
-    s_s, areaRs = asymptotic_r_vals(qnew, F, A, td)
+    Cs = cvals(qnew, F, A, tau, lambdas, spectral_matrices, mMax)
+    s_s, areaRs, *shut_rvals = asymptotic_r_vals(qnew, F, A, tau)
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
         return np.nan
@@ -98,14 +100,14 @@ def qmatrix_loglik(params, Q, idxtheta, M, b, A, F, tau, dwells):
         t2 = np.abs(dwells[2 * ii] - tau)
         p = (
             p
-            @ R(Co, lambdas, tau, so, areaRo, mMax, t1)
+            @ R(t1, Co, lambdas, tau, so, areaRo, mMax)
             @ qnew[np.ix_(A, F)]
             @ eqFFt
-            @ R(Cs, lambdas, tau, s_s, areaRs, mMax, t2)
+            @ R(t2, Cs, lambdas, tau, s_s, areaRs, mMax)
             @ qnew[np.ix_(F, A)]
             @ eqAAt
         )
-        scalefactor[ii] = 1.0 / sum(p)
+        scalefactor[ii] = 1.0 / p.sum(axis=1)
         p *= scalefactor[ii]
 
     ll = -(-sum(np.log10(scalefactor)))
@@ -173,13 +175,16 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
     # Number of multiples of tau to use for exact correction for missed events
     mMax = 2
 
-    Co, lambdas = cvals(qnew, A, F, tau, mMax)
+    # Intermediate calculations for R(t)
+    taus, lambdas, spectral_matrices = qmatvals(qnew)
+
+    Co = cvals(qnew, A, F, tau, lambdas, spectral_matrices, mMax)
     so, areaRo = asymptotic_r_vals(qnew, A, F, tau)
     if np.any(np.isinf(so)):
         # TODO: issue warning
         return np.nan
 
-    Cs, lambdas_cs = cvals(qnew, F, A, td, mMax)
+    Cs = cvals(qnew, F, A, td, lambdas, spectral_matrices, mMax)
     s_s, areaRs = asymptotic_r_vals(qnew, F, A, td)
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
@@ -229,6 +234,11 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
     return ll
 
 
+def _sub2ind(shape, i, j):
+    n_rows, n_cols = shape
+    return n_cols * i + j
+
+
 def constrain_qr(gamma, idxall, idxvary):
     """QR factorization to separate free from constrained rates
 
@@ -253,11 +263,17 @@ def constrain_qr(gamma, idxall, idxvary):
     Parameters
     ----------
     gamma : 2-d array
-        pass
-    idxall : array
-        pass
-    idxvary : array
-        pass
+        The coefficient matrix of the linear contraints on the rates in Q.
+        The number of columns of gamma should equal the number of rates in
+        the Q matrix. The number of rows in gamma is equal to the number of
+        constraints.
+    idxall : tuple
+        The indices of all rates in the Q matrix as a tuple of arrays, such
+        as would be returned by numpy.nonzero. The order of the rates in
+        idxall corresponds to the columns of gamma.
+    idxvary : tuple
+        The indices of rates in the Q matrix that can vary as a tuple of
+        arrays, such as would be returned by numpy.nonzero.
 
     Returns
     -------
@@ -265,25 +281,17 @@ def constrain_qr(gamma, idxall, idxvary):
     R1 : 2-d array
     R2 : 2-d array
     idxtheta : array
-    Gamma : 2-d array
-    R : 2-d array
-    idxconstrain : array
-    n_constrain : float
     """
 
-    if not isinstance(idxall, np.ndarray):
-        raise ValueError("idxall must be a numpy array")
-    if not isinstance(idxvary, np.ndarray):
-        raise ValueError("idxvary must be a numpy array")
-
-    if idxall.ndim != 1:
-        raise ValueError("idxall must be 1-d")
-    if idxvary.ndim != 1:
-        raise ValueError("idxvary must be 1-d")
-
-    n_rates = idxall.size
-    n_vary = idxvary.size
+    n_rates = len(idxall[0])
+    n_vary = len(idxvary[0])
     n_constrain = n_rates - n_vary
+
+    if n_rates != gamma.shape[1]:
+        raise ValueError(
+            "gamma and idxall must have the same number of rates, but gamma "
+            "had {} and idxall had {}".format(gamma.shape[0], n_rates)
+        )
 
     # Need to generate theta such that theta = log10([q(idxconstrain); q(idxvary)]);
     # Generating theta doesn't actually need to be done here, but we need to
@@ -292,16 +300,13 @@ def constrain_qr(gamma, idxall, idxvary):
     # Currently, gamma * log10(q(idxall)) == xi
     # So we need to know how to go from idxall to idxtheta
 
-    idxconstrain = np.setdiff1d(idxall, idxvary)
-    if idxconstrain.size != n_constrain:
-        raise ValueError("Number of constraints does not match.")
-
-    idxtheta = np.concatenate((idxconstrain, idxvary))
+    idx_all_pairs = tuple(zip(*idxall))
+    idx_vary_pairs = tuple(zip(*idxvary))
+    is_free = [t in idx_vary_pairs for t in idx_all_pairs]
+    ind_all_to_theta = np.argsort(is_free)
+    idxtheta = tuple(np.array(inds)[ind_all_to_theta] for inds in idxall)
     # Note that theta == log10(q(idxtheta));
-    mask = np.isin(idxtheta, idxall)
-    if not np.all(mask):
-        raise ValueError("Some elements in idxtheta were not found in idxall")
-    ind_all_to_theta = _match(idxtheta, idxall)
+
     new_gamma = gamma[:, ind_all_to_theta]
 
     # Now do the qr factorization of new_gamma
@@ -309,22 +314,7 @@ def constrain_qr(gamma, idxall, idxvary):
     R1 = R[:, :n_constrain]
     R2 = R[:, n_constrain:]
 
-    return U, R1, R2, idxtheta, new_gamma, R, idxconstrain, n_constrain
-
-
-def _sub2ind(shape, i, j):
-    n_rows, n_cols = shape
-    return n_cols * i + j
-
-
-def _mst_path(csgraph, predecessors, start, end):
-    """Construct a path along the minimum spanning tree"""
-    preds = predecessors[start]
-    path = [end]
-    while end != start:
-        end = preds[start, end]
-        path.append(end)
-    return path[::-1]
+    return U, R1, R2, idxtheta
 
 
 def constrain_rate(
@@ -364,12 +354,13 @@ def constrain_rate(
     """
 
     num_rates = len(idxall[0])
-    num_constraints = len(source_idx[0])
-    if np.ndim(constant) == 0:
-        # constant is a scalar
-        constant = constant * np.ones(num_constraints)
 
     if type == "fix":
+        num_constraints = len(source_idx[0])
+        if np.ndim(constant) == 0:
+            # constant is a scalar
+            constant = constant * np.ones(num_constraints)
+
         A = np.zeros((num_constraints, num_rates))
         idx2 = _match_hash(zip(*idxall), zip(*source_idx))
         A[np.arange(num_constraints), idx2] = 1
@@ -378,9 +369,15 @@ def constrain_rate(
         return A, B
 
     if type == "constrain":
+        num_constraints = len(source_idx[0])
+        if np.ndim(constant) == 0:
+            # constant is a scalar
+            constant = constant * np.ones(num_constraints)
+
         if len(target_idx[0]) != num_constraints:
             raise ValueError(
-                "The number of source and target rates for constraint must be equal"
+                "The number of source and target rates for constraint must "
+                "be equal"
             )
 
         A = np.zeros((num_constraints, num_rates))
@@ -393,6 +390,13 @@ def constrain_rate(
         return A, B
 
     if type == "loop":
+        num_constraints = 1
+        if np.ndim(constant) != 0 and constant.size != 1:
+            raise ValueError(
+                "With a loop constraint, the constant must be a sclar or "
+                "have only one element"
+            )
+
         A = np.zeros((1, num_rates))
         idx2 = _match_hash(zip(*idxall), zip(*source_idx))
         idx3 = _match_hash(zip(*idxall), zip(*target_idx))
@@ -406,6 +410,16 @@ def constrain_rate(
         return A, B
 
     raise ValueError("`type` must be one of 'fit', 'constrain', or 'loop'")
+
+
+def _mst_path(csgraph, predecessors, start, end):
+    """Construct a path along the minimum spanning tree"""
+    preds = predecessors[start]
+    path = [end]
+    while end != start:
+        end = preds[start, end]
+        path.append(end)
+    return path[::-1]
 
 
 def mr_constraints(
@@ -646,7 +660,8 @@ def fit_rates(
     params : 1-d array
     log_likelihood : float
     q_estimated : 2-d array
-    hessian : 2-d array
+    hess_inv : 2-d array
+        An approximation of the Hessian inverse
     cov : 2-d array
         The covariance matrix
     cor : 2-d array
@@ -664,8 +679,6 @@ def fit_rates(
             )
         )
 
-    n_dwells = len(dwells) / 2
-
     x0 = np.log10(q[idx_vary])
     n_rates = len(idx_all[0])
     n_vary = len(idx_vary[0])
@@ -675,48 +688,71 @@ def fit_rates(
         constrain = True
         U, R1, R2, idx_theta = constrain_qr(gamma, idx_all, idx_vary)
         M = np.concatenate(
-            (-1.0 * scipy.linalg.solve(R1, R2), np.eye(n_vary)), axis=-1
+            (-1.0 * scipy.linalg.solve(R1, R2), np.eye(n_vary)), axis=0
         )
+        tmp = scipy.linalg.solve(U, xi)
         b = np.concatenate(
-            (
-                scipy.linalg.solve(R1, scipy.linalg.solve(U, xi)),
-                np.zeros((idx_vary, 1)),
-            ),
-            axis=-1,
+            (scipy.linalg.solve(R1, tmp), np.zeros((n_vary, 1))), axis=0
         )
         # now q(idxtheta) == 10.^(M*x + b); where x are the variables to be optimized
 
     ll_fun = qmatrix_loglik
+    ll_args = (n_states, idx_theta, M, b, A, F, td, dwells)
 
     if not optimize:
-        log_likelihood = -ll_fun(x0)
+        log_likelihood = -ll_fun(x0, *ll_args)
         q_estimated = q.copy()
-        hessian = None
+        hess_inv = None
         cov = None
         cor = None
         history = None
 
-        return x0, log_likelihood, q_estimated, hessian, cov, cor, history
+        return x0, log_likelihood, q_estimated, hess_inv, cov, cor, history
 
-    results = scipy.optimize.minimize(ll_fun, x0, method="BFGS")
-    # params, ll, _, __, ___, hessian
+    # According to the scipy source code (optimize.py), the defaults used for
+    # the BFGS method are
+    # gtol=1e-5  -- note that gtol is the threshold for gnorm, which is normalized version of gradient
+    # norm=Inf -- order of the normalization, Inf takes the max, -Inf takes the min
+    # maxiter = len(x0) * 200
+    #
+    # Other options
+    # callback=None,
+    # eps=_epsilon,
+    # maxiter=None,
+    # disp=False,
+    # return_all=False,  -- whether or not to return all tested parameter combinations
+    options = {
+        "gtol": 1.0,
+        "maxiter": len(x0) * 500,
+        "disp": True,
+        "return_all": True,
+    }
+
+    results = scipy.optimize.minimize(
+        ll_fun, x0, args=ll_args, method="BFGS", options=options
+    )
+    print(results)
+    print(results.keys())
+
     if not results.success:
         warnings.warn(results.message)
 
+    params = 10 ** results.x
     log_likelihood = -results.fun
-    cov = results.hess_inv  # scipy.linalg.inv(hessian)
+    # hessian = scipy.linalg.inv(results.hess_inv)
+    cov = results.hess_inv
     denom = np.diag(cov).reshape(-1, 1)
-    denom = demon @ denom.T
+    denom = denom @ denom.T
     cor = cov / np.sqrt(denom)
 
-    if constrain:
-        theta = M @ results.x + b
-    else:
-        theta = results.x
-
-    params = 10 ** results.x
     q_estimated = np.zeros_like(q)
-    q_estimated[idx_theta] = np.pow(10, theta)
+
+    if constrain:
+        theta = M @ results.x.reshape(-1, 1) + b
+        q_estimated[idx_theta] = 10 ** theta.ravel()
+    else:
+        q_estimated[idx_all] = params
+
     q_estimated -= np.diag(q_estimated.sum(axis=1))
 
-    return params, log_likelihood, q_estimated, results.hess, cov, cor, history
+    return params, log_likelihood, q_estimated, results.hess_inv, cov, cor, None

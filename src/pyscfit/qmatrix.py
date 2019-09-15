@@ -21,10 +21,10 @@ def qmatvals(q):
     -------
     taus : array
         time constant for macroscopic fluctuations
-    lambda : array
-        eigenvalues of q; lambda[i] corresponds to A[:, :, i]
-    A : matrix
-        spectral matrices of q; 3-dimensional
+    lambdas : array
+        eigenvalues of q; lambdas[i] corresponds to A[:, :, i]
+    spectral_matrices : 3-d array
+        spectral matrices of the Q matrix; 3-dimensional
     """
 
     TOL = 1e-12
@@ -35,9 +35,9 @@ def qmatvals(q):
     lambdas = lambdas.real
     v = v.real
     y = scipy.linalg.inv(v)
-    A = np.zeros(v.shape + (q.shape[0],))
+    spectral_matrices = np.zeros(v.shape + (q.shape[0],))
     for k in np.arange(q.shape[0]):
-        A[:, :, k] = v[:, k, np.newaxis] @ y[np.newaxis, k, :]
+        spectral_matrices[:, :, k] = v[:, k, np.newaxis] @ y[np.newaxis, k, :]
 
     zero_mask = np.abs(lambdas) < TOL
     lambdas[zero_mask] = 0
@@ -47,15 +47,15 @@ def qmatvals(q):
     zero_mask = np.abs(lambdas) < TOL
     taus[~zero_mask] = 1.0 / lambdas[~zero_mask]
     taus[zero_mask] = np.inf
-    A = A[:, :, idx]
+    spectral_matrices = spectral_matrices[:, :, idx]
 
     # if an eigenvalue of Q is zero, then there is not a corresponding tau
     # taus[lambda==0] = 0
 
-    return taus, lambdas, A
+    return taus, lambdas, spectral_matrices
 
 
-def dvals(q, A, F, td, spec_mat):
+def dvals(q, A, F, td, spectral_matrices):
     """Calculate intermediate values for reliability function
     
     The probability that an e-open time starting in state i has not
@@ -87,8 +87,8 @@ def dvals(q, A, F, td, spec_mat):
         Indices of shut states in Q
     td : float
         Dead time
-    spec_mat : array
-        Spectral matrices of q. Must be 3-dimensional
+    spectral_matrices : 3-d array
+        Spectral matrices of the Q matrix. Must be 3-dimensional
     
     Returns
     -------
@@ -111,15 +111,15 @@ def dvals(q, A, F, td, spec_mat):
     nQ = q.shape[0]
     D = np.zeros((nA, nA, nQ))
 
-    # Indexing spec_mat with np.ix_(A, F, [ii]) creates a 3-dim array
+    # Indexing spectral_matrices with np.ix_(A, F, [ii]) creates a 3-dim array
     # so it would need to be squeezed. So we'll use the np.newaxis style
     for ii in np.arange(nQ):
-        D[:, :, ii] = spec_mat[A[:, None], F, ii] @ eQFFt @ qFA
+        D[:, :, ii] = spectral_matrices[A[:, None], F, ii] @ eQFFt @ qFA
 
     return D
 
 
-def cvals(q, A, F, td, mMax=2):
+def cvals(q, A, F, td, lambdas, spectral_matrices, mMax=2):
     """Calculate matrix-valued coefficients used in reliability function R
     
     This function calculates the matrix-valued coefficients called C in
@@ -137,6 +137,10 @@ def cvals(q, A, F, td, mMax=2):
         Indices of states in Q matrix that are shut states
     td : float
         Dead time or resolution
+    lambdas : array
+        eigenvalues of q; lambdas[i] corresponds to spectral_matrices[:, :, i]
+    spectral_matrices : 3-d array
+        Spectral matrices of the Q matrix.
     mMax : int
         Number of dead times to use exact correction for missed events
     
@@ -148,10 +152,10 @@ def cvals(q, A, F, td, mMax=2):
 
     nstates = q.shape[0]
     nA = A.shape[0]
-    taus, lambdas, specA = qmatvals(q)
-    D = dvals(q, A, F, td, specA)
+
+    D = dvals(q, A, F, td, spectral_matrices)
     C = np.zeros((nA, nA, nstates, mMax + 1, mMax + 1))
-    sAaa = specA[A[:, None], A, :]
+    sAaa = spectral_matrices[A[:, None], A, :]
 
     for i in np.arange(nstates):
         for m in np.arange(mMax + 1):
@@ -191,10 +195,7 @@ def cvals(q, A, F, td, mMax=2):
                                 D[:, :, j]
                                 @ C[:, :, i, m - 1, r]
                                 * np.math.factorial(r)
-                                / (
-                                    n
-                                    * (lambdas[i] - lambdas[j]) ** (r - n + 1)
-                                )
+                                / (n * (lambdas[i] - lambdas[j]) ** (r - n + 1))
                             )
                     C[:, :, i, m, n] = (
                         D[:, :, i] @ C[:, :, i, m - 1, n - 1] / n - tmp
@@ -240,7 +241,7 @@ def R(t, C, lambdas, tau, s, areaR, mMax=2):
 
     TOL = 1e-12
 
-    nr, nc = areaR.shape
+    nr, nc, _nd = areaR.shape
     f = np.zeros((nr, nc))
 
     if t < 0:
@@ -249,25 +250,25 @@ def R(t, C, lambdas, tau, s, areaR, mMax=2):
     if t <= mMax * tau:
         # Exact correction for missed events
         kA = lambdas.size
-        m = np.ceil(t / tau) - 1
+        m = np.ceil(t / tau).astype(np.int_) - 1
         if np.abs(t) < TOL:
             m = 0
 
-        for i in np.arange(m + 1):
-            for j in np.arange(kA):
-                for k in np.arange(i):
+        for i in range(m + 1):
+            for j in range(kA):
+                for k in range(i + 1):
                     # Beware of the indexing!!!! KKO 140923
                     f += np.real(
                         (-1) ** i
                         * C[:, :, j, i, k]
-                        * (t - ii * tau) ** kk
-                        * np.exp(-lambdas[jj] * (t - ii * tau))
+                        * (t - i * tau) ** k
+                        * np.exp(-lambdas[j] * (t - i * tau))
                     )
     else:
         # Approximate correction for missed events
         kA = s.size
-        for ii in np.arange(kA):
-            f += np.real(np.exp(s[ii] * t) * areaR[:, :, ii])
+        for i in range(kA):
+            f += np.real(np.exp(s[i] * t) * areaR[:, :, i])
 
     return f
 
@@ -389,7 +390,7 @@ def equilibrium_occupancy(q):
     p_eq : 1-d array
         The probabilities of occupying each state at equilibrium
     """
-    
+
     # At equilibrium, the transition probabilities do not change with time
     # Hence, dp/dt = 0, but dp/dt = p(t)*Q so
     # p(inf)*Q = 0, subject to the sum of the probabilities must be 1, i.e.
@@ -404,18 +405,18 @@ def equilibrium_occupancy(q):
     u = np.ones((n, 1))
     one = np.ones((1, 1))
     z = np.zeros((1, n))
-    
+
     a = np.concatenate((q, u), axis=1)
     b = np.concatenate((z, one), axis=1)
-    
+
     p_eq, res, rnk, s = scipy.linalg.lstsq(a.T, b.T)
-    
+
     return p_eq.T
 
 
 def equilibrium_occupancy_ch95(q):
     """Calculate equilibrium occupancies using code from Colquhoun and Hawkes"""
-    
+
     # The following code is from Colquhoun and Hawkes 1995 - works fine
     # u = ones(1,size(q,1));
     # S = [q, ones(size(q,1),1)];
@@ -440,5 +441,5 @@ def equilibrium_occupancy_ch95(q):
     # %     peq = u/(S*S');
     #     peq = u/M;
     # end
-    
+
     raise NotImplementedError()

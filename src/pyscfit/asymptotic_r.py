@@ -20,10 +20,6 @@ def asymptotic_r_vals(q, A, F, tau):
     s that render the matrix W(s) singular. The values of s that render
     W(s) singular are the roots of the determinant of W(s). That is,
           det W(s) = 0
-    Jalali and Hawkes (1992) Adv Appl Prob 24 pp.302-321 prove that if the
-    Q matrix is irreducible and reversible (which should hold if the gating
-    mechanism follows microscopic reversibility - see Colquhoun and Hawkes
-    1982 pp. 24-25), then det W(s) = 0 has exactly kA roots
     
     Parameters
     ----------
@@ -38,13 +34,26 @@ def asymptotic_r_vals(q, A, F, tau):
     
     Returns
     -------
-    s :
-    areaR :
-    r :
-    c :
+    s : 1-d array
+        The roots of the determinant of W(s), i.e det W(s) = 0.
+    areaR : 3-d array
+        
+    r : 2-d array
+        The left eigenvectors of H(s), where s are the roots of det W(s) and
+        also eigenvalues of H(s). r is a solution to rW(s) = 0, ru=1, where
+        u is a vector of ones
+    c : 2-d array
+        The right eigenvector of H(s). c is a solution to c'W(s)' = 0, c'u =1
     Wprime :
     mu :
     a :
+    
+    Notes
+    -----
+    Jalali and Hawkes (1992) Adv Appl Prob 24 pp.302-321 prove that if the
+    Q matrix is irreducible and reversible (which should hold if the gating
+    mechanism follows microscopic reversibility - see Colquhoun and Hawkes
+    1982 pp. 24-25), then det W(s) = 0 has exactly kA roots
     """
 
     TOL = 1e-9

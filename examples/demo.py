@@ -38,15 +38,18 @@ A = np.arange(2)
 F = np.arange(2, n_states)
 
 # Simulate data
+print("Simulating data ...")
 n_dwells = 50000
 dwells, states = pyscfit.dwells.monte_carlo_dwells(q, A, F, n_dwells)
 
 # Resolution (aka dead time), in milliseconds
 td = 0.1
+print("Imposing resolution of {} milliseconds".format(td))
 resolved_dwells, resolved_states = pyscfit.dwells.impose_res(
     dwells, states, td, td
 )
 
+print("Concatenating adjacent dwells in the same state ...")
 concat_dwells, concat_states = pyscfit.dwells.concat_dwells(
     resolved_dwells, resolved_states
 )
@@ -72,6 +75,7 @@ src = ([0, 1, 2, 3], [1, 2, 3, 0])
 tgt = ([0, 3, 2, 1], [3, 2, 1, 0])
 gamma, xi = pyscfit.fitting.constrain_rate(idx_all, src, tgt, type="loop")
 
-rates, ll, qnew = hjcfit(
+print("Finding rate constants ...")
+rates, ll, qnew, hess, cov, cor, hist = pyscfit.fitting.fit_rates(
     concat_dwells, q_guess, A, F, td, idx_all, idx_vary, gamma, xi
 )
