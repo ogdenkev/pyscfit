@@ -82,6 +82,10 @@ def qmatrix_loglik(params, n_states, idxtheta, M, b, A, F, tau, dwells):
     eqAAt = scipy.linalg.expm(qnew[np.ix_(A, A)] * tau)
     eqFFt = scipy.linalg.expm(qnew[np.ix_(F, F)] * tau)
     phiA = phi(qnew, A, F, tau)
+    qAF = qnew[np.ix_(A, F)]
+    qFA = qnew[np.ix_(F, A)]
+    qAF_eqFFt = qAF @ eqFFt
+    qFA_eqAAt = qFA @ eqAAt
 
     # Calculation of the forward recursions, which are used to calculate the
     # likelihood, will run into numerical problems because the probabilities
@@ -95,17 +99,15 @@ def qmatrix_loglik(params, n_states, idxtheta, M, b, A, F, tau, dwells):
 
     scalefactor = np.zeros((ndwells, 1))
     p = phiA
-    for ii in np.arange(ndwells):
+    for ii in range(ndwells):
         t1 = np.abs(dwells[2 * ii - 1] - tau)
         t2 = np.abs(dwells[2 * ii] - tau)
         p = (
             p
             @ R(t1, Co, lambdas, tau, so, areaRo, mMax)
-            @ qnew[np.ix_(A, F)]
-            @ eqFFt
+            @ qAF_eqFFt
             @ R(t2, Cs, lambdas, tau, s_s, areaRs, mMax)
-            @ qnew[np.ix_(F, A)]
-            @ eqAAt
+            @ qFA_eqAAt
         )
         scalefactor[ii] = 1.0 / p.sum(axis=1)
         p *= scalefactor[ii]
@@ -616,6 +618,15 @@ def mr_constraints(
     return Gamma, Xi, idxConstrain, idxMR, MST
 
 
+class FitCallback:
+    def __init__(self, counter=0):
+        self.counter = counter
+
+    def counter_callback(self, x):
+        self.counter += 1
+        print(self.counter)
+
+
 def fit_rates(
     dwells, q, A, F, td, idx_all, idx_vary, gamma=None, xi=None, optimize=True
 ):
@@ -709,10 +720,13 @@ def fit_rates(
 
         return x0, log_likelihood, q_estimated, hess_inv, cov, cor, history
 
+    # Callback to show the number of iterations
+    fit_callback = FitCallback()
+
     # According to the scipy source code (optimize.py), the defaults used for
     # the BFGS method are
     # gtol=1e-5  -- note that gtol is the threshold for gnorm, which is normalized version of gradient
-    # norm=Inf -- order of the normalization, Inf takes the max, -Inf takes the min
+    # norm=Inf -- order of the gradient normalization, Inf takes the max, -Inf takes the min
     # maxiter = len(x0) * 200
     #
     # Other options
@@ -723,16 +737,19 @@ def fit_rates(
     # return_all=False,  -- whether or not to return all tested parameter combinations
     options = {
         "gtol": 1.0,
-        "maxiter": len(x0) * 500,
+        "maxiter": 10,  # len(x0) * 500,
         "disp": True,
         "return_all": True,
     }
 
     results = scipy.optimize.minimize(
-        ll_fun, x0, args=ll_args, method="BFGS", options=options
+        ll_fun,
+        x0,
+        args=ll_args,
+        method="BFGS",
+        options=options,
+        callback=fit_callback.counter_callback,
     )
-    print(results)
-    print(results.keys())
 
     if not results.success:
         warnings.warn(results.message)
