@@ -7,6 +7,7 @@ correction for missed events
 
 import numpy as np
 import scipy.linalg
+import joblib
 
 import pyscfit.dwells
 import pyscfit.qmatrix
@@ -79,3 +80,22 @@ print("Finding rate constants ...")
 rates, ll, qnew, hess, cov, cor, hist = pyscfit.fitting.fit_rates(
     concat_dwells, q_guess, A, F, td, idx_all, idx_vary, gamma, xi
 )
+
+outfile = "demo_results.joblib"
+print("Saving results to {}".format(outfile))
+with open(outfile, "wb") as fd:
+    joblib.dump(
+        {
+            "rates": rates,
+            "ll": ll,
+            "qnew": qnew,
+            "hess": hess,
+            "cov": cov,
+            "cor": cor,
+            "hist": hist,
+        },
+        fd
+    )
+
+print("Fitted rates:")
+print(rates)
