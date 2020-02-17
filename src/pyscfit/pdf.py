@@ -12,16 +12,16 @@ from .qmatrix import qmatvals, cvals, phi
 
 def asymptotic_r_vals(q, A, F, tau):
     """Calculate the values used for the asymptotic approximation of R
-    
+
     R is a reliability or survivor function used in the calculation
-    of the exact pdf of dwell times with missed events 
+    of the exact pdf of dwell times with missed events
     See Hawkes et al (1992) Phil Trans R Soc Lond B pp.393-394
-   
+
     The asymptotic behavior of the matrix function, R, depends on values of
     s that render the matrix W(s) singular. The values of s that render
     W(s) singular are the roots of the determinant of W(s). That is,
           det W(s) = 0
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -32,7 +32,7 @@ def asymptotic_r_vals(q, A, F, tau):
         The indices of states in class 2 (closed)
     tau : float
         The dead time
-    
+
     Returns
     -------
     s : 1-d array
@@ -48,7 +48,7 @@ def asymptotic_r_vals(q, A, F, tau):
     Wprime :
     mu :
     a :
-    
+
     Notes
     -----
     Jalali and Hawkes (1992) Adv Appl Prob 24 pp.302-321 prove that if the
@@ -217,8 +217,8 @@ def W(s, q, A, F, tau):
         $$H(s) = Q_{AA} + Q_{AF} \left ( \int_0^{\tau} e^{-st}e^{Qt}dt \right ) Q_{FA}$$
     or, if s is not an eigenvalue of Q(F,F), then inv(s*I - Q(F,F)) exists
     and
-        H(s) = Q(A,A) + Q(A,F)*inv(s*I - Q(F,F))*(I - exp(-(s*I-Q(F,F))*tau))*Q(F,A)    
-    
+        H(s) = Q(A,A) + Q(A,F)*inv(s*I - Q(F,F))*(I - exp(-(s*I-Q(F,F))*tau))*Q(F,A)
+
     Parameters
     ----------
     s :
@@ -226,7 +226,7 @@ def W(s, q, A, F, tau):
     A :
     F :
     tau :
-    
+
     Returns
     -------
     W : 2-d array
@@ -271,12 +271,12 @@ def W(s, q, A, F, tau):
 
 def detW(s, q, A, F, tau):
     """Determinant of the matrix function W(s)
-    
+
     See Hawkes, Jalali, & Colquhoun (1990)
-    
+
     Parameters
     ----------
-    s : 
+    s :
     q : 2-d array
         The Q matrix
     A : array
@@ -285,7 +285,7 @@ def detW(s, q, A, F, tau):
         Indices of states in class 2
     tau : float
         The dead time (or resolution)
-    
+
     Returns
     -------
     2-d array
@@ -302,16 +302,16 @@ def detW(s, q, A, F, tau):
 
 def dWds(s, q, A, F, tau):
     """Calculate the derivative of the matrix function W(s)
-    
+
     The derivative of W(s) is used in the asymptotic approximation to the
     matrix function R, which governs the pdf of dwell times when events are
     missed (see Hawkes et al 1990).
- 
+
     This definition of dWds is from Hawkes et al (1992) pp. 394, eq. (56)
-    
+
     Parameters
     ----------
-    s : 
+    s :
     q : 2-d array
         The Q matrix
     A : array
@@ -320,7 +320,7 @@ def dWds(s, q, A, F, tau):
         Indices of states in class 2
     tau : float
         The dead time
-    
+
     Returns
     -------
     dWds : 2-d array
@@ -350,13 +350,13 @@ def dWds(s, q, A, F, tau):
 
 def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
     """Gives the initial and final vectors used for rate MLE from bursts
-    
+
     The initial vector, phib, and the final vector, ef, are used in the
     maximum likelihood estimation of single channel rate constants when the
     input data are bursts of channel activity. These vectors are described
     by Colquhoun, Hawkes, and Srodzinski (1996) Phil Trans R Soc Lond A,
     equations 5.8 and 5.11
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -378,7 +378,7 @@ def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
     tcrit : float
         Critical gap length separating bursts of activity arising from a
         single ion channel
-    
+
     Returns
     -------
     phib : 1-d array
@@ -417,16 +417,16 @@ def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
 
 def R(t, C, lambdas, tau, s, areaR, mMax=2):
     """Calculate the value of the matrix function R(t)
-    
+
     R(t) is a kind of reliability or survivor function, in which R(i,j)
     gives the probability that a resolved open time, starting in state i,
     has not yet finished and is currently in state j.  Another way to state
-    this is that R(i,j)[t] = the probability that 1)you're in state j and 
+    this is that R(i,j)[t] = the probability that 1)you're in state j and
     2)there has been no resolvable shut time during the interval 0 to t
     given that you were in state i at time 0.
- 
+
     For details see Hawkes et al (1990, 1992)
-    
+
     Parameters
     ----------
     C : array
@@ -438,12 +438,12 @@ def R(t, C, lambdas, tau, s, areaR, mMax=2):
         The imposed resolution
     s : array
         Generalized eigenvalues used for asymptotic approximation to R(t)
-        The s values can be calculated from the function asymptoticRvals 
+        The s values can be calculated from the function asymptoticRvals
     areaR : array
         The area of each exponential component given in s
     t : float
         The time at which to return R(t)
-    
+
     Returns
     -------
     R : 2-d array
@@ -486,7 +486,7 @@ def R(t, C, lambdas, tau, s, areaR, mMax=2):
 
 def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
     """Exact pdf for open (or shut) times for a gating mechanism
-    
+
     Parameters
     ----------
     t : 1-d array
@@ -504,13 +504,13 @@ def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
     is_log : bool, optional
         If True, `is_log` indicates that `t` is the logarithm of the
         dwell times instead of the dwell times themselves.
-    
+
     Returns
     -------
     pdf : 1-d array
         The exact probability density function with a correction for missed
         events.
-    
+
     Notes
     -----
     The exact correction for missed events is described by Hawkes, Jalali,
@@ -541,41 +541,20 @@ def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
     if is_log:
         t = 10 ** t
 
-        post_vals = np.fromiter(
+    pdf = np.fromiter(
+        (
             (
-                (
-                    phiA
-                    @ R(tt - tau, lambdas, tau, s, areaR, mMax)
-                    @ qAF
-                    @ eqFFt
-                    @ uF
-                ).squeeze()
-                for tt in t
-            )
+                phiA
+                @ R(tt - tau, lambdas, tau, s, areaR, mMax)
+                @ qAF
+                @ eqFFt
+                @ uF
+            ).squeeze()
+            for tt in t
         )
+    )
 
-        pdf = np.log(10) * t * post_vals
-
-        # for ii in range(len(t)):
-        #     pdf[ii] = (
-        #         np.log(10)
-        #         * t[ii]
-        #         * phiA
-        #         @ R(t[ii] - tau, C, lambdas, tau, s, areaR, mMax)
-        #         @ qAF
-        #         @ eqFFt
-        #         @ uF
-        #     )
-        #
-        # return pdf
-
-    for ii in range(len(t)):
-        pdf[ii] = (
-            phiA
-            @ R(t[ii] - tau, C, lambdas, tau, s, areaR, mMax)
-            @ qAF
-            @ eqFFt
-            @ uF
-        )
+    if is_log:
+        pdf = np.log(10) * t * pdf
 
     return pdf
