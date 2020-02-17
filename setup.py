@@ -21,6 +21,11 @@ setuptools.setup(
     # tell distutils packages are under src
     package_dir={'':'src'},
     
+    install_requires = [
+        "numpy>=1.17",
+        "scipy>=1.3",
+    ],
+
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
