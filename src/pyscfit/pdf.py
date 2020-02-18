@@ -545,13 +545,14 @@ def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
         (
             (
                 phiA
-                @ R(tt - tau, lambdas, tau, s, areaR, mMax)
+                @ R(tt - tau, C, lambdas, tau, s, areaR, mMax)
                 @ qAF
                 @ eqFFt
                 @ uF
             ).squeeze()
             for tt in t
-        )
+        ),
+        dtype=np.float_,
     )
 
     if is_log:
