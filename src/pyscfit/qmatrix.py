@@ -6,17 +6,17 @@ import numpy as np
 
 def qmatvals(q):
     """Calculate the time constants and spectral matrices for a Q matrix
-    
+
     The spectral matrices of Q are used to calculate the areas of the
     componenets of the exponential mixture distribution.
-    
+
     Parameters
     ----------
     q : matrix
-        Q matrix, a k-by-k matrix where k is the number of states and 
+        Q matrix, a k-by-k matrix where k is the number of states and
         q[i, j] is the transition rate from state i to state j and
         q[i, i] is a number such that the sum of each row is zero
-    
+
     Returns
     -------
     taus : array
@@ -57,26 +57,26 @@ def qmatvals(q):
 
 def dvals(q, A, F, td, spectral_matrices):
     """Calculate intermediate values for reliability function
-    
+
     The probability that an e-open time starting in state i has not
     finished and is currently in state j is given by equation 3.1 in
     Hawkes, Jalali, and Colquhoun (1990). This function, called R(t),
     is a matrix function. Equation 3.11 of HJC (1990) gives R(t) as an
     infinite series of m-fold convolutions.
-    
+
     HJC prove that the m-fold convolutions can be expressed in terms of
     a product of a polynomial of degree m in t (with matrix-valued
     coefficients) and an exponential. The polynomial coefficients depend
     on the spectral matrices of Q and the sub-matrix exponential.
-    
+
     This function returns the product of the spectral matrices of Q and
     the sub-matrix exponential. It is equation 3.16 in Hawkes, Jalali, and
     Colquhoun (1990) Phil. Trans. R. Soc. Lond. A.
-    
+
         $$ D_j = A_{jAF}e^{Q_{FF}\tau}Q_{FA} $$
-    
+
     where A_j are the spectral matrices of Q
-    
+
     Parameters
     ----------
     q : matrix
@@ -89,7 +89,7 @@ def dvals(q, A, F, td, spectral_matrices):
         Dead time
     spectral_matrices : 3-d array
         Spectral matrices of the Q matrix. Must be 3-dimensional
-    
+
     Returns
     -------
     D : 3-d array
@@ -121,12 +121,12 @@ def dvals(q, A, F, td, spectral_matrices):
 
 def cvals(q, A, F, td, lambdas, spectral_matrices, mMax=2):
     """Calculate matrix-valued coefficients used in reliability function R
-    
+
     This function calculates the matrix-valued coefficients called C in
     the Theorem on page 519 of Hawkes, et al. (1990) Phil. Trans. R. Soc.
     Lond. A. These coefficients are used for the polynomial of degree m in
     t, which Hawkes et al. refer to as B.
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -143,7 +143,7 @@ def cvals(q, A, F, td, lambdas, spectral_matrices, mMax=2):
         Spectral matrices of the Q matrix.
     mMax : int
         Number of dead times to use exact correction for missed events
-    
+
     Returns
     -------
     C : array
@@ -197,24 +197,22 @@ def cvals(q, A, F, td, lambdas, spectral_matrices, mMax=2):
                                 * np.math.factorial(r)
                                 / (n * (lambdas[i] - lambdas[j]) ** (r - n + 1))
                             )
-                    C[:, :, i, m, n] = (
-                        D[:, :, i] @ C[:, :, i, m - 1, n - 1] / n - tmp
-                    )
+                    C[:, :, i, m, n] = D[:, :, i] @ C[:, :, i, m - 1, n - 1] / n - tmp
 
     return C
 
 
 def eG(q, A, F, tau, s):
     """Laplace transform of the corrected probability density matrix
-    
+
     A semi-Markov process occurs when the Markov process with the
     transition rate matrix Q switches from the set of states A to the
     set of states F. This function gives the Laplace transform of the
     matrix of probability densities of the intervals in the case when all
     events of duration less than tau are missed.
-    
+
     See equations 2.12, 2.19, and 2.20 of HJC1990.
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -227,7 +225,7 @@ def eG(q, A, F, tau, s):
         The dead time or resolution, below which all events are missed
     s : complex
         The Laplace variable, s, which is a complex number
-    
+
     Returns
     -------
     eG : 2-d array
@@ -264,15 +262,15 @@ def eG(q, A, F, tau, s):
 
 def phi(q, A, F, tau):
     """Equilibrium vector for the semi-Markov process
-    
+
     A semi-Markov process is embedded in the continuous time Markov chain
     with transition rate matrix Q when that process changes from the set
     of states A to the set of states F. This function gives the equilibrium
     vector of that semi-Markov process.
-    
+
     See equations 2.14 of HJC1990.
     Also see Hawkes and Sykes (1990) IEEE Trans on Reliability
-    
+
     Parameters
     ----------
     q : 2-d array
@@ -283,7 +281,7 @@ def phi(q, A, F, tau):
         The final set of states after the transition
     tau : float
         The dead time or resolution below which no events are detected
-    
+
     Returns
     -------
     phi : 1-d array
@@ -306,16 +304,16 @@ def phi(q, A, F, tau):
 
 def equilibrium_occupancy(q):
     """Calculate the equilibrium state occupancies for the Q matrix
-    
+
     Parameters
     ----------
     q : 2-d array
-        a k-by-k matrix where k is the number of states and 
+        a k-by-k matrix where k is the number of states and
         q[i, j] is the transition rate from state i to state j and
         q[i, i] is a number such that the sum of each row is zero
-        -1/q[i, i] also happens to be the mean lifetime of a sojourn 
+        -1/q[i, i] also happens to be the mean lifetime of a sojourn
         in the state i
-    
+
     Returns
     -------
     p_eq : 1-d array
@@ -343,4 +341,3 @@ def equilibrium_occupancy(q):
     p_eq, res, rnk, s = scipy.linalg.lstsq(a.T, b.T)
 
     return p_eq.T
-
