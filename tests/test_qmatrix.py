@@ -1,11 +1,17 @@
 import unittest
 import numpy as np
-from pyscfit.qmatrix import qmatvals, dvals, cvals
+from pyscfit.qmatrix import qmatvals, dvals, cvals, equilibrium_occupancy, phi
 
 
 class QMatrixTestCase(unittest.TestCase):
     def setUp(self):
-        """Create Q matrix from Q-Matrix Cookbook p. 593"""
+        """Create Q matrix from Q-Matrix Cookbook p. 593
+
+        True eigenvalues of Q (i.e. lambdas) are on p. 601
+        True taus are on p. 601
+        The spectral matrices are on pp. 601-602
+        The equilibrium occupancies are on p. 597
+        """
         self.Q = np.array(
             [
                 [-3.05, 0.05, 0, 3, 0],
@@ -210,6 +216,7 @@ class QMatrixTestCase(unittest.TestCase):
                 ],
             ]
         )
+        self.true_equilibrium_occupancies = np.array([[0.00002483, 0.001862, 0.00006207, 0.004965, 0.9931]])
 
         self.taus, self.lambdas, self.A = qmatvals(self.Q)
 
@@ -259,9 +266,10 @@ class QMatrixTestCase(unittest.TestCase):
         pass
     
     def test_phi(self):
-        # TODO: Get known values of phi from a known input
+        # TODO
+        # def phi(q, A, F, tau):
         pass
 
     def test_equilibrium_occupancy(self):
-        pass
+        np.testing.assert_allclose(self.true_equilibrium_occupancies, equilibrium_occupancy(self.Q), rtol=1e-03)
 
