@@ -344,33 +344,3 @@ def equilibrium_occupancy(q):
 
     return p_eq.T
 
-
-def equilibrium_occupancy_ch95(q):
-    """Calculate equilibrium occupancies using code from Colquhoun and Hawkes"""
-
-    # The following code is from Colquhoun and Hawkes 1995 - works fine
-    # u = ones(1,size(q,1));
-    # S = [q, ones(size(q,1),1)];
-    # % Test for singularity
-    # M = S*S';
-    # if rank(M) < min(size(M))
-    #     %singluar
-    #     %so calculate the states at some long time at which equilibrium
-    #     %is likely to have been reached (assume time is in seconds)
-    # %     peq = u*expm(q*100);
-    # %     fprintf ('Singular');
-    # %     try
-    # %         peq = u/M;
-    # %     catch
-    #         warning ('Matrix is Singular');
-    #         q;
-    #         %well, output something, I guess
-    #         peq = zeros(1,size(q,1));
-    #         peq(1) = 1;
-    # %     end
-    # else
-    # %     peq = u/(S*S');
-    #     peq = u/M;
-    # end
-
-    raise NotImplementedError()
