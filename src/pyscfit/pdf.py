@@ -245,6 +245,7 @@ def W(s, q, A, F, tau):
     M = s * idF - qFF
     # check whether (sI-qFF)^-1 exists, which will not occur if sI-qFF is singular,
     # if sI-qFF is singular, the det(sI-qFF)=0 or equivalently s is an eigenvalue of qFF
+    # Colquhoun, Hawkes, and Srodzinski ignore cases when s is an eigenvalue of qFF
     if np.any(np.abs(eigFF - s) < TOL):
         # since (sI-qFF)^-1 does not exist, we cannot shortcut calculation of
         # the integral e^(-(sI-qFF)*t), so let's estimate it numerically
@@ -408,9 +409,7 @@ def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
         Hfa += areaR[:, :, i] @ const * mu[i] * np.exp(-time / mu[i])
 
     ef = Hfa @ uA
-    numer = phiF @ Hfa @ uA
-    denom = phiF @ Hfa
-    phib = scipy.linalg.solve(numer.T, denom.T).T
+    phib = (phiF @ Hfa) / (phiF @ Hfa @ uA)
 
     return phib, ef
 
