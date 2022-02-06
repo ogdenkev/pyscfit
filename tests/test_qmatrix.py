@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
-from pyscfit.qmatrix import qmatvals, dvals, cvals, equilibrium_occupancy, phi
+import scipy.linalg
+from pyscfit.qmatrix import qmatvals, dvals, cvals, equilibrium_occupancy, phi, eG
 
 
 class QMatrixTestCase(unittest.TestCase):
@@ -216,7 +217,9 @@ class QMatrixTestCase(unittest.TestCase):
                 ],
             ]
         )
-        self.true_equilibrium_occupancies = np.array([[0.00002483, 0.001862, 0.00006207, 0.004965, 0.9931]])
+        self.true_equilibrium_occupancies = np.array(
+            [[0.00002483, 0.001862, 0.00006207, 0.004965, 0.9931]]
+        )
 
         self.taus, self.lambdas, self.A = qmatvals(self.Q)
 
@@ -225,11 +228,13 @@ class QMatrixTestCase(unittest.TestCase):
         self.td = 0.05
         self.dvals = dvals(self.Q, self.a_ind, self.f_ind, self.td, self.A)
         self.mMax = 2
-        self.C = cvals(self.Q, self.a_ind, self.f_ind, self.td, self.lambdas, self.A, self.mMax)
+        self.C = cvals(
+            self.Q, self.a_ind, self.f_ind, self.td, self.lambdas, self.A, self.mMax
+        )
 
     def test_qmatvals_imaginary_eigenvalues_of_q_raises_error(self):
-        # TODO: Create a Q matrix with imaginary eigenvalues ?!?
-        pass
+        q = np.array([[1, 2], [-2, 1]])
+        self.assertRaises(ValueError, qmatvals, q)
 
     def test_qmatvals_taus(self):
         self.assertTrue(np.allclose(self.taus, self.true_taus))
@@ -261,15 +266,86 @@ class QMatrixTestCase(unittest.TestCase):
         )
         self.assertTrue(np.allclose(self.C[:, :, 0, 0, 0], true_C000))
 
-    def test_eG(self):
-        # TODO: Find a known correct output of this from a given Q matrix
-        pass
-    
-    def test_phi(self):
-        # TODO
-        # def phi(q, A, F, tau):
-        pass
-
     def test_equilibrium_occupancy(self):
-        np.testing.assert_allclose(self.true_equilibrium_occupancies, equilibrium_occupancy(self.Q), rtol=1e-03)
+        np.testing.assert_allclose(
+            self.true_equilibrium_occupancies, equilibrium_occupancy(self.Q), rtol=1e-03
+        )
 
+
+class MarkovChainTransitionAndPhiTest(unittest.TestCase):
+    def setUp(self):
+        q = np.array([[-3, 2, 1], [1, -2, 1], [1, 2, -3]])
+        tau = 0.5
+        qAA = q[-1:, -1:]
+        qAF = q[-1:, :-1]
+        qFA = q[:-1, -1:]
+        qFF = q[:-1, :-1]
+        qAA_inv = np.array([[-1 / 3]])
+        negative_qAA_inv = -1.0 * qAA_inv
+        qFF_inv = np.array([[-0.5, -0.5], [-0.25, -0.75]])
+        negative_qFF_inv = -1.0 * qFF_inv
+        qFF_tau_eig1 = -2
+        qFF_tau_eig2 = -1 / 2
+        qFF_tau_x1 = np.array([[-2], [1]])
+        qFF_tau_x2 = np.array([[1], [1]])
+        X = np.concatenate((qFF_tau_x1, qFF_tau_x2), axis=1)
+        X_inv = np.array([[-1.0 / 3.0, 1.0 / 3.0], [1.0 / 3.0, 2.0 / 3.0]])
+        D = np.array([[qFF_tau_eig1, 0], [0, qFF_tau_eig2]])
+        eD = np.array([[np.exp(qFF_tau_eig1), 0], [0, np.exp(qFF_tau_eig2)]])
+        exp_qFF_tau = np.array(
+            [
+                [
+                    (2 / 3) * np.exp(qFF_tau_eig1) + (1 / 3) * np.exp(qFF_tau_eig2),
+                    -(2 / 3) * np.exp(qFF_tau_eig1) + (2 / 3) * np.exp(qFF_tau_eig2),
+                ],
+                [
+                    -(1 / 3) * np.exp(qFF_tau_eig1) + (1 / 3) * np.exp(qFF_tau_eig2),
+                    (1 / 3) * np.exp(qFF_tau_eig1) + (2 / 3) * np.exp(qFF_tau_eig2),
+                ],
+            ]
+        )
+        exp_qAA_tau = np.exp(qAA * tau)
+        I_AA = np.eye(*qAA.shape)
+        I_FF = np.eye(*qFF.shape)
+        omega = (
+            I_AA
+            - negative_qAA_inv @ qAF @ (I_FF - exp_qFF_tau) @ negative_qFF_inv @ qFA
+        )
+        self.eG_AF_star = scipy.linalg.inv(omega) @ negative_qAA_inv @ qAF @ exp_qFF_tau
+        omicron = (
+            I_FF
+            - negative_qFF_inv @ qFA @ (I_AA - exp_qAA_tau) @ negative_qAA_inv @ qAF
+        )
+        self.eG_FA_star = (
+            scipy.linalg.inv(omicron) @ negative_qFF_inv @ qFA @ exp_qAA_tau
+        )
+        self.q = q
+        self.tau = tau
+
+    def test_eG(self):
+        self.assertTrue(
+            np.allclose(
+                eG(self.q, np.array([2]), np.array([0, 1]), self.tau, 0),
+                self.eG_AF_star,
+            )
+        )
+        self.assertTrue(
+            np.allclose(
+                eG(self.q, np.array([0, 1]), np.array([2]), self.tau, 0),
+                self.eG_FA_star,
+            )
+        )
+
+    def test_phi(self):
+        self.assertTrue(
+            np.allclose(
+                phi(self.q, np.array([2]), np.array([0, 1]), self.tau),
+                np.array([[1.0]]),
+            )
+        )
+        self.assertTrue(
+            np.allclose(
+                phi(self.q, np.array([0, 1]), np.array([2]), self.tau),
+                np.array([[1 / 3, 2 / 3]]),
+            )
+        )
