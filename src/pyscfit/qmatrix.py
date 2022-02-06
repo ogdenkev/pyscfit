@@ -208,7 +208,7 @@ def eG(q, A, F, tau, s):
     A semi-Markov process occurs when the Markov process with the
     transition rate matrix Q switches from the set of states A to the
     set of states F. This function gives the Laplace transform of the
-    matrix of probability densities of the intervals in the case when all
+    matrix of probability densities of the e-intervals in the case when all
     events of duration less than tau are missed.
 
     See equations 2.12, 2.19, and 2.20 of HJC1990.
@@ -253,6 +253,7 @@ def eG(q, A, F, tau, s):
     # See equations 2.17 and 2.18 in HJC1990
     long_FF = prob_tau_to_inf
 
+    # Equation 2.19 in HJC1990
     numer = I_AA - Gstar_AF @ short_FF @ Gstar_FA
     denom = Gstar_AF @ long_FF
     y = scipy.linalg.solve(numer, denom)
