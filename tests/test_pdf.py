@@ -10,6 +10,7 @@ from pyscfit.pdf import (
     chs_vectors,
     R,
     asymptotic_R,
+    exact_R,
     exact_pdf_with_missed_events,
 )
 
@@ -229,7 +230,24 @@ class KatzQMatrixTest(unittest.TestCase):
         self.assertTrue(np.allclose(result, Rt))
 
     def test_exact_R(self):
-        pass
+        k = self.Q.shape[0]
+        eigvals, eigvecs = scipy.linalg.eig(self.Q)
+        Y = scipy.linalg.inv(eigvecs)
+        spec_mat = [eigvecs[:, i : i + 1] @ Y[i : i + 1, :] for i in range(k)]
+        C = [spec_mat[i][np.ix_(self.iA, self.iA)] for i in range(k)]
+        _C = np.stack(C, axis=-1)[:, :, :, None, None]
+        t = 1.5 * self.tau
+        u = t - self.tau
+        R_u = sum(C[i] * np.exp(-eigvals[i] * u) for i in range(k))
+        result = exact_R(u, eigvals, self.tau, _C)
+        print(result)
+        print(R_u)
+        self.assertTrue(np.allclose(result, R_u))
+
+    def test_exact_R_t_greater_than_two_tau_less_than_three_tau(self):
+        t = 2.5 * self.tau
+        u = t - self.tau
+        # result = exact_R(u, eigvals, self.tau, _C)
 
     def test_reliability_function_with_time_less_than_zero(self):
         t = -0.2
