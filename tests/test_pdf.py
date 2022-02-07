@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 import numpy as np
 import scipy.linalg
-from pyscfit.pdf import W, detW, dWds, asymptotic_r_vals, chs_vectors, R
+from pyscfit.pdf import W, detW, dWds, asymptotic_r_vals, chs_vectors, R, asymptotic_R, exact_pdf_with_missed_events
 
 
 class WTestCase(unittest.TestCase):
@@ -181,18 +182,36 @@ class KatzQMatrixTest(unittest.TestCase):
         self.assertTrue(np.allclose(phib, self.phiB))
         self.assertTrue(np.allclose(ef, self.eb))
 
-    def test_reliability_function_R(self):
-        # def R(t, C, lambdas, tau, s, areaR, mMax=2):
+    def test_chs_vectors_with_bad_areaR_shape(self):
+        bad_areaR = np.concatenate([self.areaR_, self.areaR_], axis=1)
+        with self.assertRaises(ValueError):
+            phib, ef = chs_vectors(
+                self.Q, self.iA, self.iF, bad_areaR, self.mu_, self.tau, self.tcrit
+            )
+
+    @patch("pyscfit.pdf.asymptotic_R")
+    def test_reliability_function_R_asymptotic(self, mock_asymptotic_R):
         t = 0.5
         result = R(t, None, None, self.tau, self.s_, self.areaR_)
+        self.assertTrue(mock_asymptotic_R.called)
+
+    @patch("pyscfit.pdf.exact_R")
+    def test_reliability_function_R_exact(self, mock_exact_R):
+        t = 0.35
+        result = R(t, None, None, self.tau, None, None)
+        self.assertTrue(mock_exact_R.called)
+
+    def test_asymptotic_R(self):
+        t = 0.5
+        result = asymptotic_R(t, self.areaR_, self.s_)
         Rt_1 = (
-            np.exp(self.s1 * 0.5)
+            np.exp(self.s1 * t)
             * self.c1
             @ self.r1
             / (self.r1 @ self.Wprime_s1 @ self.c1)
         )
         Rt_2 = (
-            np.exp(self.s2 * 0.5)
+            np.exp(self.s2 * t)
             * self.c2
             @ self.r2
             / (self.r2 @ self.Wprime_s2 @ self.c2)
@@ -200,10 +219,62 @@ class KatzQMatrixTest(unittest.TestCase):
         Rt = Rt_1 + Rt_2
         self.assertTrue(np.allclose(result, Rt))
 
+    def test_exact_R(self):
+        pass
+
     def test_reliability_function_with_time_less_than_zero(self):
         t = -0.2
         result = R(t, None, None, self.tau, self.s_, self.areaR_)
         self.assertTrue(np.allclose(result, 0))
 
     def test_exact_pdf_with_missed_events(self):
-        pass
+        t0 = np.array([0.9])
+        t = t0 - self.tau
+        result = exact_pdf_with_missed_events(t0, self.Q, self.iF, self.iA, self.tau, is_log=False)
+        Rt_1 = (
+            np.exp(self.s1 * t[0])
+            * self.c1
+            @ self.r1
+            / (self.r1 @ self.Wprime_s1 @ self.c1)
+        )
+        Rt_2 = (
+            np.exp(self.s2 * t[0])
+            * self.c2
+            @ self.r2
+            / (self.r2 @ self.Wprime_s2 @ self.c2)
+        )
+        Rt = Rt_1 + Rt_2
+        pdf = (
+            self.phiF
+            @ Rt
+            @ self.Qfa
+            @ scipy.linalg.expm(self.Qaa * self.tau)
+            @ np.ones((2, 1))
+        )
+        self.assertTrue(np.allclose(result, pdf))
+
+    def test_exact_pdf_with_missed_events_log10_input(self):
+        t0 = np.array([0.9])
+        t = t0 - self.tau
+        result = exact_pdf_with_missed_events(np.log10(t0), self.Q, self.iF, self.iA, self.tau, is_log=True)
+        Rt_1 = (
+            np.exp(self.s1 * t[0])
+            * self.c1
+            @ self.r1
+            / (self.r1 @ self.Wprime_s1 @ self.c1)
+        )
+        Rt_2 = (
+            np.exp(self.s2 * t[0])
+            * self.c2
+            @ self.r2
+            / (self.r2 @ self.Wprime_s2 @ self.c2)
+        )
+        Rt = Rt_1 + Rt_2
+        pdf = (
+            self.phiF
+            @ Rt
+            @ self.Qfa
+            @ scipy.linalg.expm(self.Qaa * self.tau)
+            @ np.ones((2, 1))
+        )
+        self.assertTrue(np.allclose(result, np.log(10) * t0 * pdf))

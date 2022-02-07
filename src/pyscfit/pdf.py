@@ -10,6 +10,87 @@ import scipy.optimize
 from .qmatrix import qmatvals, cvals, phi
 
 
+def R(t, C, lambdas, tau, s, areaR, mMax=2):
+    """Calculate the value of the matrix function R(t)
+
+    R(t) is a kind of reliability or survivor function, in which R(i,j)
+    gives the probability that a resolved open time, starting in state i,
+    has not yet finished and is currently in state j.  Another way to state
+    this is that R(i,j)[t] = the probability that 1)you're in state j and
+    2)there has been no resolvable shut time during the interval 0 to t
+    given that you were in state i at time 0.
+
+    For details see Hawkes et al (1990, 1992)
+
+    Parameters
+    ----------
+    C : array
+        C is used to calculate the exact value of R for times less than or
+        equal to twice the imposed resolution
+    lambdas : array
+        Eigenvalues of the Q matrix
+    tau : float
+        The imposed resolution
+    s : array
+        Generalized eigenvalues used for asymptotic approximation to R(t)
+        The s values can be calculated from the function asymptoticRvals
+    areaR : array
+        The area of each exponential component given in s
+    t : float
+        The time at which to return R(t)
+
+    Returns
+    -------
+    R : 2-d array
+        The reliability/survivor function R(t) evaluated at time t
+    """
+
+    if t < 0:
+        nr, nc, _nd = areaR.shape
+        return np.zeros((nr, nc))
+
+    if t <= mMax * tau:
+        return exact_R(t, lambdas, tau, C)
+
+    return asymptotic_R(t, areaR, s)
+
+
+def asymptotic_R(t, areaR, s):
+    """Approximate correction for missed events"""
+    nr, nc, _nd = areaR.shape
+    f = np.zeros((nr, nc))
+
+    kA = s.size
+    for i in range(kA):
+        f += np.real(np.exp(s[i] * t) * areaR[:, :, i])
+
+    return f
+
+
+def exact_R(t, lambdas, tau, C):
+    """Exact correction for missed events"""
+    TOL = 1e-12
+    nr, nc, *_nd = C.shape
+    f = np.zeros((nr, nc))
+    kA = lambdas.size
+    m = np.ceil(t / tau).astype(np.int_) - 1
+    if np.abs(t) < TOL:
+        m = 0
+
+    for i in range(m + 1):
+        for j in range(kA):
+            for k in range(i + 1):
+                # Beware of the indexing!!!! KKO 140923
+                f += np.real(
+                    (-1) ** i
+                    * C[:, :, j, i, k]
+                    * (t - i * tau) ** k
+                    * np.exp(-lambdas[j] * (t - i * tau))
+                )
+
+    return f
+
+
 def asymptotic_r_vals(q, A, F, tau):
     """Calculate the values used for the asymptotic approximation of R
 
@@ -139,9 +220,7 @@ def asymptotic_r_vals(q, A, F, tau):
     x0 = np.real(x0)
     for rr in np.arange(uu):
         bracket = [x0[idx1[rr]], x0[idx2[rr]]]
-        sol = scipy.optimize.root_scalar(
-            detW, bracket=bracket, args=(q, A, F, tau)
-        )
+        sol = scipy.optimize.root_scalar(detW, bracket=bracket, args=(q, A, F, tau))
         if np.all(np.abs(sol.root - s) > TOL):
             s[ii] = sol.root
             ii += 1
@@ -214,7 +293,7 @@ def W(s, q, A, F, tau):
     s that render the matrix W(s) singular.  W(s) is defined as
         $$W(s) = sI - H(s)$$
     where
-        $$H(s) = Q_{AA} + Q_{AF} \left ( \int_0^{\tau} e^{-st}e^{Qt}dt \right ) Q_{FA}$$
+        $$H(s) = Q_{AA} + Q_{AF} \\left ( \\int_0^{\\tau} e^{-st}e^{Qt}dt \\right ) Q_{FA}$$
     or, if s is not an eigenvalue of Q(F,F), then inv(s*I - Q(F,F)) exists
     and
         H(s) = Q(A,A) + Q(A,F)*inv(s*I - Q(F,F))*(I - exp(-(s*I-Q(F,F))*tau))*Q(F,A)
@@ -414,75 +493,6 @@ def chs_vectors(q, A, F, areaR, mu, tau, tcrit):
     return phib, ef
 
 
-def R(t, C, lambdas, tau, s, areaR, mMax=2):
-    """Calculate the value of the matrix function R(t)
-
-    R(t) is a kind of reliability or survivor function, in which R(i,j)
-    gives the probability that a resolved open time, starting in state i,
-    has not yet finished and is currently in state j.  Another way to state
-    this is that R(i,j)[t] = the probability that 1)you're in state j and
-    2)there has been no resolvable shut time during the interval 0 to t
-    given that you were in state i at time 0.
-
-    For details see Hawkes et al (1990, 1992)
-
-    Parameters
-    ----------
-    C : array
-        C is used to calculate the exact value of R for times less than or
-        equal to twice the imposed resolution
-    lambdas : array
-        Eigenvalues of the Q matrix
-    tau : float
-        The imposed resolution
-    s : array
-        Generalized eigenvalues used for asymptotic approximation to R(t)
-        The s values can be calculated from the function asymptoticRvals
-    areaR : array
-        The area of each exponential component given in s
-    t : float
-        The time at which to return R(t)
-
-    Returns
-    -------
-    R : 2-d array
-        The reliability/survivor function R(t) evaluated at time t
-    """
-
-    TOL = 1e-12
-
-    nr, nc, _nd = areaR.shape
-    f = np.zeros((nr, nc))
-
-    if t < 0:
-        return f
-
-    if t <= mMax * tau:
-        # Exact correction for missed events
-        kA = lambdas.size
-        m = np.ceil(t / tau).astype(np.int_) - 1
-        if np.abs(t) < TOL:
-            m = 0
-
-        for i in range(m + 1):
-            for j in range(kA):
-                for k in range(i + 1):
-                    # Beware of the indexing!!!! KKO 140923
-                    f += np.real(
-                        (-1) ** i
-                        * C[:, :, j, i, k]
-                        * (t - i * tau) ** k
-                        * np.exp(-lambdas[j] * (t - i * tau))
-                    )
-    else:
-        # Approximate correction for missed events
-        kA = s.size
-        for i in range(kA):
-            f += np.real(np.exp(s[i] * t) * areaR[:, :, i])
-
-    return f
-
-
 def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
     """Exact pdf for open (or shut) times for a gating mechanism
 
@@ -543,11 +553,7 @@ def exact_pdf_with_missed_events(t, q, A, F, tau, is_log=True):
     pdf = np.fromiter(
         (
             (
-                phiA
-                @ R(tt - tau, C, lambdas, tau, s, areaR, mMax)
-                @ qAF
-                @ eqFFt
-                @ uF
+                phiA @ R(tt - tau, C, lambdas, tau, s, areaR, mMax) @ qAF @ eqFFt @ uF
             ).squeeze()
             for tt in t
         ),
