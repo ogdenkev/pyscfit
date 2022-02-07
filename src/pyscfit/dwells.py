@@ -100,7 +100,7 @@ def fix_shut_amps(dwells, states, zero_amp=0.0):
             continue
 
         zero_amp_dwells.extend(sjrn_dwells)
-        zero_amp_states.extend(srjn_states)
+        zero_amp_states.extend(sjrn_states)
 
     return np.array(zero_amp_dwells), np.array(zero_amp_states)
 
