@@ -594,7 +594,7 @@ def mr_constraints(
     # now, we'd need the index of the overlap from idxMR ...
 
     distances, predecessors = scipy.sparse.csgraph.shortest_path(
-        MST, directed=False, indices=(ii, jj), return_predecessors=True
+        MST, directed=False, return_predecessors=True
     )
 
     Gamma = np.zeros((num_constraints + num_mr_constraints, num_rates))
