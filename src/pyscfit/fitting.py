@@ -125,7 +125,7 @@ def qmatrix_loglik(params, n_states, idxtheta, M, b, A, F, tau, dwells):
     return ll
 
 
-def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
+def qmatrix_loglik_bursts(params, q, idxtheta, M, b, A, F, tau, tcrit, dwells):
     """Log likelihood of rates in a gating mechanism from bursts of activity
 
     Calculate the log likelihood of rates in an ion channel gating mechanism
@@ -194,8 +194,8 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
         # TODO: issue warning
         return np.nan
 
-    Cs = cvals(qnew, F, A, td, lambdas, spectral_matrices, mMax)
-    s_s, areaRs = asymptotic_r_vals(qnew, F, A, td)
+    Cs = cvals(qnew, F, A, tau, lambdas, spectral_matrices, mMax)
+    s_s, areaRs = asymptotic_r_vals(qnew, F, A, tau)
     if np.any(np.isinf(s_s)):
         # TODO: issue warning
         return np.nan
@@ -220,7 +220,7 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
         scalefactor = np.zeros(numdwells)
         for jj in np.arange(numdwells):
             dwell_time = tmpdwells[jj] - tau
-            if j % 2 == 0:
+            if jj % 2 == 0:
                 pF = (
                     pA
                     @ R(Co, lambdas, tau, so, areaRo, mMax, dwell_time)
@@ -238,7 +238,7 @@ def qmatrix_loglik_bursts(params, Q, idxtheta, M, b, A, F, tau, tcrit, dwells):
                 )
                 scalefactor[jj] = 1.0 / sum(pA)
                 pA *= scalefactor[jj]
-        LL[ii] = -sum(np.log10(scalefactor)) + log10(pF @ ef)
+        LL[ii] = -sum(np.log10(scalefactor)) + np.log10(pF @ ef)
     ll = -sum(LL)
 
     return ll
@@ -393,8 +393,8 @@ def constrain_rate(
         A = np.zeros((num_constraints, num_rates))
         idx2 = _match_hash(zip(*idxall), zip(*source_idx))
         idx3 = _match_hash(zip(*idxall), zip(*target_idx))
-        A[np.arange(num_constrants), idx2] = -1
-        A[np.arange(num_constrants), idx3] = 1
+        A[np.arange(num_constraints), idx2] = -1
+        A[np.arange(num_constraints), idx3] = 1
         B = np.log10(constant).reshape(-1, 1)
 
         return A, B
@@ -546,7 +546,7 @@ def mr_constraints(
             "They are being set to zero to find the minimum "
             "spanning tree."
         )
-        Q[np.eye(*q.shape, dtype=bool)] = 0
+        q[np.eye(*q.shape, dtype=bool)] = 0
 
     # scipy.sparse.minimum_spanning_tree goes through the nodes in the
     # graph rowwise (I believe this is due to the way indices are stored
@@ -597,13 +597,13 @@ def mr_constraints(
         MST, directed=False, indices=(ii, jj), return_predecessors=True
     )
 
-    Gamma = np.zeros((num_constrants + num_mr_constraints, num_rates))
-    idxConstrain = np.zeros(num_constrants + num_mr_constraints)
-    Xi = np.zeros((num_constrants + num_mr_constraints, 1))
+    Gamma = np.zeros((num_constraints + num_mr_constraints, num_rates))
+    idxConstrain = np.zeros(num_constraints + num_mr_constraints)
+    Xi = np.zeros((num_constraints + num_mr_constraints, 1))
 
-    Gamma[:num_constrants, :] = gamma
-    idxConstrain[:num_constrants, :] = idxconstrain
-    Xi[:num_constrants, :] = xi
+    Gamma[:num_constraints, :] = gamma
+    idxConstrain[:num_constraints, :] = idxconstrain
+    Xi[:num_constraints, :] = xi
 
     for n, sub in enumerate(zip(*idxMR)):
         ii, jj = sub
@@ -612,13 +612,13 @@ def mr_constraints(
         pth_next = np.roll(pth, -1)
         src = _sub2ind(q.shape, pth, pth_next)
 
-        rev_path = path[::-1]
+        rev_path = pth[::-1]
         rev_path_next = np.roll(rev_path, -1)
         tgt = _sub2ind(q.shape, rev_path, rev_path_next)
 
         tmpg, tmpxi = constrain_rate(q, idxall, src, tgt, "loop")
 
-        ind = num_constrants + n
+        ind = num_constraints + n
         Gamma[ind, :] = tmpg
         Xi[ind, :] = tmpxi
         idxConstrain[ind, :] = _sub2ind(ii, jj)
