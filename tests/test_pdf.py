@@ -2,7 +2,16 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import scipy.linalg
-from pyscfit.pdf import W, detW, dWds, asymptotic_r_vals, chs_vectors, R, asymptotic_R, exact_pdf_with_missed_events
+from pyscfit.pdf import (
+    W,
+    detW,
+    dWds,
+    asymptotic_r_vals,
+    chs_vectors,
+    R,
+    asymptotic_R,
+    exact_pdf_with_missed_events,
+)
 
 
 class WTestCase(unittest.TestCase):
@@ -230,7 +239,9 @@ class KatzQMatrixTest(unittest.TestCase):
     def test_exact_pdf_with_missed_events(self):
         t0 = np.array([0.9])
         t = t0 - self.tau
-        result = exact_pdf_with_missed_events(t0, self.Q, self.iF, self.iA, self.tau, is_log=False)
+        result = exact_pdf_with_missed_events(
+            t0, self.Q, self.iF, self.iA, self.tau, is_log=False
+        )
         Rt_1 = (
             np.exp(self.s1 * t[0])
             * self.c1
@@ -256,7 +267,9 @@ class KatzQMatrixTest(unittest.TestCase):
     def test_exact_pdf_with_missed_events_log10_input(self):
         t0 = np.array([0.9])
         t = t0 - self.tau
-        result = exact_pdf_with_missed_events(np.log10(t0), self.Q, self.iF, self.iA, self.tau, is_log=True)
+        result = exact_pdf_with_missed_events(
+            np.log10(t0), self.Q, self.iF, self.iA, self.tau, is_log=True
+        )
         Rt_1 = (
             np.exp(self.s1 * t[0])
             * self.c1
